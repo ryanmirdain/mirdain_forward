@@ -90,8 +90,10 @@ It uses pinned action revisions and Qt 6.9.2, caches the SDK, and builds:
 | `mirdain_forward-windows-x64` | `windows-2022` | `.exe`, Qt DLLs, plugins, and compiler runtime |
 
 Qt MQTT is built from the pinned Qt 6.9.2 source revision and installed into the
-CI SDK because the public SDK catalog does not provide MQTT binaries. Its tests
-and examples are disabled. Windows ZIPs also include the MSVC runtime DLLs
+CI SDK because the public SDK catalog does not provide MQTT binaries. It uses
+Ninja with a single Release configuration; build and install are separate steps
+so installation only runs after a successful build. Its tests and examples are
+disabled. Windows ZIPs also include the MSVC runtime DLLs
 beside the executable so they can run without a separate runtime installation.
 
 Once the workflow file is pushed, open a completed run's **Artifacts** section

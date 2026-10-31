@@ -65,17 +65,18 @@ jobs:
       - name: Configure Qt MQTT
         shell: bash
         run: >-
-          cmake -S build-deps/qtmqtt -B build-deps/qtmqtt-build
+          cmake -G Ninja -S build-deps/qtmqtt -B build-deps/qtmqtt-build
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}"
           -DCMAKE_INSTALL_PREFIX="${QT_ROOT_DIR}"
           -DQT_BUILD_TESTS=OFF
           -DQT_BUILD_EXAMPLES=OFF
 
-      - name: Build and install Qt MQTT
-        run: |
-          cmake --build build-deps/qtmqtt-build --config Release --parallel
-          cmake --install build-deps/qtmqtt-build --config Release
+      - name: Build Qt MQTT
+        run: cmake --build build-deps/qtmqtt-build --parallel
+
+      - name: Install Qt MQTT
+        run: cmake --install build-deps/qtmqtt-build
 
       - name: Configure
         shell: bash
