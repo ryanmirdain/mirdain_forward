@@ -1,0 +1,119 @@
+name: Build apps
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}-${{ matrix.cpu }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: macos
+            cpu: arm64
+            qt-arch: clang_64
+          - runner: macos-15-intel
+            platform: macos
+            cpu: x86_64
+            qt-arch: clang_64
+          - runner: windows-2022
+            platform: windows
+            cpu: x64
+            qt-arch: win64_msvc2022_64
+
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        with:
+          version: '6.9.2'
+          arch: ${{ matrix.qt-arch }}
+          modules: qthttpserver qtwebsockets qtimageformats
+          cache: true
+
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
+
+      - name: Check out Qt MQTT
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          repository: qt/qtmqtt
+          ref: 3bbef1d7643b71465a114a7163990ac59da68ff4 # Qt 6.9.2
+          path: build-deps/qtmqtt
+          persist-credentials: false
+
+      - name: Configure Qt MQTT
+        shell: bash
+        run: >-
+          cmake -S build-deps/qtmqtt -B build-deps/qtmqtt-build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}"
+          -DCMAKE_INSTALL_PREFIX="${QT_ROOT_DIR}"
+          -DQT_BUILD_TESTS=OFF
+          -DQT_BUILD_EXAMPLES=OFF
+
+      - name: Build and install Qt MQTT
+        run: |
+          cmake --build build-deps/qtmqtt-build --config Release --parallel
+          cmake --install build-deps/qtmqtt-build --config Release
+
+      - name: Configure
+        shell: bash
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}"
+
+      - name: Build and deploy dependencies
+        run: cmake --build build --config Release --parallel
+
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        run: |
+          package="dist/mirdain_forward-macos-${{ matrix.cpu }}"
+          mkdir -p "$package"
+          cp README.md "$package/README.md"
+          cp build/_deps/miniz-src/LICENSE "$package/miniz-LICENSE"
+          cp build-deps/qtmqtt/LICENSES/GPL-3.0-only.txt "$package/QtMqtt-LICENSE"
+          ditto build/mirdain_forward.app "$package/mirdain_forward.app"
+          codesign --verify --deep --strict "$package/mirdain_forward.app"
+          ditto -c -k --sequesterRsrc --keepParent "$package" "$package.zip"
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force
+          Copy-Item README.md build/Release/README.md
+          Copy-Item build/_deps/miniz-src/LICENSE build/Release/miniz-LICENSE
+          Copy-Item build-deps/qtmqtt/LICENSES/GPL-3.0-only.txt build/Release/QtMqtt-LICENSE
+          Copy-Item "$env:VCToolsRedistDir/x64/Microsoft.VC143.CRT/*.dll" build/Release/
+          Compress-Archive -Path build/Release/* -DestinationPath dist/mirdain_forward-windows-x64.zip
+
+      - name: Upload app
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mirdain_forward-${{ matrix.platform }}-${{ matrix.cpu }}
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 14

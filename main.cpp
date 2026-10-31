@@ -1,6 +1,8 @@
 #include "PrinterSender.h"
+#include "ZipArchive.h"
 
 #include <QApplication>
+#include <QBuffer>
 #include <QCryptographicHash>
 #include <QFileInfo>
 #include <QFontMetrics>
@@ -15,7 +17,6 @@
 #include <QMessageBox>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
-#include <QProcess>
 #include <QRegularExpression>
 #include <QSystemTrayIcon>
 #include <QTcpServer>
@@ -47,16 +48,6 @@ static QHttpServerResponse response(const QByteArray &origin, Status status, con
     return result;
 }
 
-static QByteArray readMember(const QString &archive, const QString &member)
-{
-    // Read only the named member to stdout; never extract archive paths to disk.
-    QProcess unzip;
-    unzip.start("/usr/bin/unzip", {"-p", archive, member});
-    if (!unzip.waitForFinished(30000) || unzip.exitCode() != 0)
-        throw std::runtime_error(("Cannot read archive member: " + member).toStdString());
-    return unzip.readAllStandardOutput();
-}
-
 static QJsonObject parseObject(const QByteArray &bytes)
 {
     QJsonParseError error;
@@ -66,16 +57,12 @@ static QJsonObject parseObject(const QByteArray &bytes)
     return document.object();
 }
 
-static QString nativeGcodePath(const QString &archive)
+static QString plateGcodePath(ZipArchive &archive, bool native)
 {
-    QProcess unzip;
-    unzip.start("/usr/bin/unzip", {"-Z1", archive});
-    if (!unzip.waitForFinished(30000) || unzip.exitCode() != 0)
-        throw std::runtime_error("Cannot list the native plate archive.");
-    const auto members = QString::fromUtf8(unzip.readAllStandardOutput()).split('\n')
-        .filter(QRegularExpression("^Metadata/plate_[0-9]+\\.gcode$"));
+    const auto members = archive.members().filter(QRegularExpression(
+        native ? "^Metadata/plate_[0-9]+\\.gcode$" : "\\.gcode$"));
     if (members.size() != 1)
-        throw std::runtime_error("The native plate archive must contain one Metadata/plate_N.gcode file.");
+        throw std::runtime_error("The selected plate archive must contain one G-code file.");
     return members.first();
 }
 
@@ -203,7 +190,8 @@ private:
                 return;
             }
             try {
-                const auto manifest = parseObject(readMember(job->archive.fileName(), "manifest.json"));
+                ZipArchive archive(job->archive);
+                const auto manifest = parseObject(archive.read("manifest.json"));
                 const auto slices = manifest.value("slices").toArray();
                 if (manifest.value("format").toString() != "mirdain" || slices.isEmpty())
                     throw std::runtime_error("The archive has no Mirdain slices.");
@@ -216,17 +204,16 @@ private:
                 const auto member = slice.contains("plate_paths")
                     ? slice.value("plate_paths").toObject().value("0").toString()
                     : slice.value("path").toString();
-                if (slice.value("format").toString() != "gcode.3mf" || !member.endsWith(".gcode.3mf")
-                    || member.contains(QRegularExpression("[\\*?\\[\\]]")))
+                if (slice.value("format").toString() != "gcode.3mf" || !member.endsWith(".gcode.3mf"))
                     throw std::runtime_error("The selected slice has no .gcode.3mf output for plate 0.");
                 // Each native per-plate package contains one plain .gcode file.
-                auto package = readMember(job->archive.fileName(), member);
-                QTemporaryFile plate;
-                if (!plate.open() || plate.write(package) != package.size() || !plate.flush())
-                    throw std::runtime_error("Cannot write the temporary plate package.");
+                auto package = archive.read(member);
+                QBuffer plate(&package);
+                plate.open(QIODevice::ReadOnly);
+                ZipArchive nativePlate(plate);
                 const bool native = job->sender->fileFormat() == PrinterFile::Format::Gcode3mf;
-                const auto gcodePath = native ? nativeGcodePath(plate.fileName()) : QString("*.gcode");
-                auto gcode = readMember(plate.fileName(), gcodePath);
+                const auto gcodePath = plateGcodePath(nativePlate, native);
+                auto gcode = nativePlate.read(gcodePath);
                 if (gcode.isEmpty()) throw std::runtime_error("The sliced plate is empty.");
                 job->filename = QFileInfo(member).fileName();
                 if (!native) job->filename.chop(4); // .gcode.3mf -> .gcode

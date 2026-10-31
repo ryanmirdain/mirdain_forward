@@ -1,2 +1,4 @@
 /build/
+/build-deps/
+/dist/
 .DS_Store

@@ -1,10 +1,12 @@
 #include "BambuSender.h"
 
 #include <QJsonDocument>
+#include <QDir>
 #include <QMqttSubscription>
 #include <QRandomGenerator>
 #include <QSslConfiguration>
 #include <QSslSocket>
+#include <QStandardPaths>
 #include <QUuid>
 
 #include <stdexcept>
@@ -128,6 +130,7 @@ void BambuSender::upload()
         finish("Cannot write the temporary Bambu plate archive.");
         return;
     }
+    archive.close(); // Let curl open the file on Windows as well as macOS.
     emit progress("Uploading Bambu plate over FTPS…");
     ftpUrl.setPath("/" + file.filename);
     connect(&transfer, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
@@ -145,7 +148,14 @@ void BambuSender::upload()
     });
     // Config goes over stdin so the LAN access code is absent from process arguments.
     // -q prevents a user's .curlrc from changing authentication or enabling logs.
-    transfer.start(MIRDAIN_CURL_PATH, {"-q", "--config", "-"});
+#ifdef Q_OS_WIN
+    const auto curl = QDir(qEnvironmentVariable("SystemRoot")).filePath("System32/curl.exe");
+#elif defined(Q_OS_MACOS)
+    const QString curl = "/usr/bin/curl";
+#else
+    const auto curl = QStandardPaths::findExecutable("curl");
+#endif
+    transfer.start(curl, {"-q", "--config", "-"});
     const auto config = "url = " + curlQuote(ftpUrl.toString(QUrl::FullyEncoded))
         + "\nuser = " + curlQuote("bblp:" + accessCode)
         + "\nupload-file = " + curlQuote(archive.fileName())

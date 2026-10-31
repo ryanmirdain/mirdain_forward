@@ -33,9 +33,14 @@ plate selection, tray status, and response flow are shared.
 ## Build and run
 
 Requires Qt 6.8+ with Widgets, Network, HTTP Server, WebSockets, and MQTT, CMake,
-a C++17 compiler, `/usr/bin/unzip`, and `curl` with FTPS support (both tools are
-included with macOS). Bambu uploads run curl as a subprocess; credentials go
-through stdin rather than process arguments. macOS uses `/usr/bin/curl`.
+a C/C++17 compiler, and `curl` with FTPS support. CMake downloads and statically
+links a pinned miniz 3.1.2 source archive on first configure; no external unzip
+tool is needed. Dependency examples, fuzzers, and tests are disabled.
+Bambu uploads run curl as a subprocess; credentials go through stdin rather than
+process arguments. macOS uses `/usr/bin/curl`; Windows uses the operating system's
+`System32/curl.exe`; Linux finds curl on PATH.
+
+### macOS
 
 ```sh
 cmake -S . -B build -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
@@ -49,8 +54,51 @@ files are removed before linking, so rebuilding cannot mix bundled and Homebrew
 Qt libraries. `LSUIElement` keeps the app in the menu bar without a Dock icon.
 Allow local network access if macOS requests it.
 
+### Windows
+
+Install Visual Studio 2022 C++ build tools and Qt's MSVC 2022 x64 kit, including
+the HTTP Server, WebSockets, and Image Formats modules. Build and install the
+matching Qt MQTT module from source as shown in the workflow below; it is not
+included in the public SDK binaries. From a Visual Studio developer PowerShell
+prompt (adjust the Qt path for your installation):
+
+```powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH=C:/Qt/6.9.2/msvc2022_64
+cmake --build build --config Release --parallel
+.\build\Release\mirdain_forward.exe
+```
+
+Each link runs `windeployqt` to copy Qt DLLs, plugins, and compiler runtime files
+beside the executable. Distribute the whole `build/Release` folder. The executable
+uses the supplied app icon and runs in the system tray without a console window.
+Windows 10/11 supplies curl; printer credentials and the localhost API work the
+same way as on macOS.
+
 On Linux, use your Qt installation's CMake prefix and run `build/mirdain_forward`
-in a desktop environment with a system tray and `/usr/bin/unzip` installed.
+in a desktop environment with a system tray and curl installed.
+
+## GitHub Actions builds
+
+The **Build apps** workflow in `.github/workflows/build.yml` runs on pushes to
+`main`, pull requests, and manual **Actions > Build apps > Run workflow** runs.
+It uses pinned action revisions and Qt 6.9.2, caches the SDK, and builds:
+
+| Artifact | Runner | Contents |
+| --- | --- | --- |
+| `mirdain_forward-macos-arm64` | `macos-15` | Apple Silicon `.app` with bundled Qt |
+| `mirdain_forward-macos-x86_64` | `macos-15-intel` | Intel `.app` with bundled Qt |
+| `mirdain_forward-windows-x64` | `windows-2022` | `.exe`, Qt DLLs, plugins, and compiler runtime |
+
+Qt MQTT is built from the pinned Qt 6.9.2 source revision and installed into the
+CI SDK because the public SDK catalog does not provide MQTT binaries. Its tests
+and examples are disabled. Windows ZIPs also include the MSVC runtime DLLs
+beside the executable so they can run without a separate runtime installation.
+
+Once the workflow file is pushed, open a completed run's **Artifacts** section
+to download the ZIP for your platform. Artifacts are kept for 14 days. macOS ZIPs
+preserve the app bundle's symlinks and permissions. The builds include the README
+and miniz/Qt MQTT licenses. macOS uses ad-hoc signing; Windows builds are unsigned. This
+workflow builds and packages only; it does not run tests or publish releases.
 
 ## Request
 
