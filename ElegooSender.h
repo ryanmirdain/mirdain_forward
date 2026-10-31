@@ -1,6 +1,6 @@
 #pragma once
 
-#include "PrinterSender.h"
+#include "PrinterSendJob.h"
 
 #include <QNetworkAccessManager>
 #include <QTimer>
@@ -10,7 +10,17 @@
 
 class ElegooSender : public PrinterSender {
 public:
-    explicit ElegooSender(const QJsonObject &connection);
+    QString protocol() const override { return "elegoo_sdcp"; }
+    bool supportsAutoLevelBed() const override { return true; }
+
+protected:
+    int defaultPort() const override { return 3030; }
+    std::unique_ptr<PrinterSendJob> createJob(const QJsonObject &connection) const override;
+};
+
+class ElegooSendJob : public PrinterSendJob {
+public:
+    explicit ElegooSendJob(const QJsonObject &connection, bool autoLevelBed);
     void send(PrinterFile file) override;
 
 private:

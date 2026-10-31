@@ -22,6 +22,8 @@ qt_standard_project_setup()
 
 qt_add_executable(mirdain_forward MACOSX_BUNDLE
     main.cpp
+    PrinterSettings.h PrinterSettings.cpp
+    PrinterSendJob.h
     PrinterSender.h PrinterSender.cpp
     ElegooSender.h ElegooSender.cpp
     PrusaSender.h PrusaSender.cpp

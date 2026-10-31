@@ -9,7 +9,13 @@
 
 #include <utility>
 
-ElegooSender::ElegooSender(const QJsonObject &connection)
+std::unique_ptr<PrinterSendJob> ElegooSender::createJob(const QJsonObject &connection) const
+{
+    return std::make_unique<ElegooSendJob>(connection, autoLevelBedEnabled());
+}
+
+ElegooSendJob::ElegooSendJob(const QJsonObject &connection, bool autoLevelBed)
+    : PrinterSendJob(autoLevelBed)
 {
     uploadUrl = connectionUrl(connection, "http", 3030);
     uploadUrl.setPath("/uploadFile/upload");
@@ -19,7 +25,7 @@ ElegooSender::ElegooSender(const QJsonObject &connection)
     });
 }
 
-void ElegooSender::send(PrinterFile input)
+void ElegooSendJob::send(PrinterFile input)
 {
     file = std::move(input);
     md5 = file.gcodeMd5;
@@ -27,7 +33,7 @@ void ElegooSender::send(PrinterFile input)
     upload();
 }
 
-void ElegooSender::finish(const QString &error)
+void ElegooSendJob::finish(const QString &error)
 {
     confirmationTimeout.stop();
     discovery.disconnect(this);
@@ -38,7 +44,7 @@ void ElegooSender::finish(const QString &error)
     else emit failed(error);
 }
 
-void ElegooSender::upload()
+void ElegooSendJob::upload()
 {
     const auto chunk = file.data.mid(offset, 1024 * 1024);
     auto *form = new QHttpMultiPart(QHttpMultiPart::FormDataType);
@@ -85,7 +91,7 @@ void ElegooSender::upload()
     });
 }
 
-void ElegooSender::sendCommand(int command, const QJsonObject &parameters)
+void ElegooSendJob::sendCommand(int command, const QJsonObject &parameters)
 {
     commandId = QUuid::createUuid().toString(QUuid::Id128).left(16);
     const QJsonObject data{{"Cmd", command}, {"Data", parameters}, {"RequestID", commandId},
@@ -94,7 +100,7 @@ void ElegooSender::sendCommand(int command, const QJsonObject &parameters)
     socket.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
 }
 
-void ElegooSender::connectPrinter()
+void ElegooSendJob::connectPrinter()
 {
     connect(&socket, &QWebSocket::connected, this, [this] { sendCommand(0); });
     connect(&socket, &QWebSocket::errorOccurred, this, [this] {
@@ -117,7 +123,7 @@ void ElegooSender::connectPrinter()
             emit progress("Starting print…");
             const int platformType = file.bedType.contains("Textured", Qt::CaseInsensitive) ? 0 : 1;
             sendCommand(128, {{"Filename", "/local/" + file.filename}, {"StartLayer", 0},
-                {"Calibration_switch", 1}, {"PrintPlatformType", platformType},
+                {"Calibration_switch", autoLevelBed ? 1 : 0}, {"PrintPlatformType", platformType},
                 {"Tlp_Switch", 0}, {"slot_map", QJsonArray{}}});
         }
         const auto data = message.value("Data").toObject();
@@ -133,7 +139,7 @@ void ElegooSender::connectPrinter()
     socket.open(url);
 }
 
-void ElegooSender::startPrint()
+void ElegooSendJob::startPrint()
 {
     emit progress("Connecting to printer controls…");
     connect(&discovery, &QUdpSocket::connected, this, [this] { discovery.write("M99999"); });

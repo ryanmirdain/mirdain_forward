@@ -9,7 +9,13 @@
 #include <stdexcept>
 #include <utility>
 
-PrusaSender::PrusaSender(const QJsonObject &connection)
+std::unique_ptr<PrinterSendJob> PrusaSender::createJob(const QJsonObject &connection) const
+{
+    return std::make_unique<PrusaSendJob>(connection, autoLevelBedEnabled());
+}
+
+PrusaSendJob::PrusaSendJob(const QJsonObject &connection, bool autoLevelBed)
+    : PrinterSendJob(autoLevelBed)
 {
     origin = connectionUrl(connection, "http", 80);
     apiKey = connection.value("api_key").toString().trimmed().toUtf8();
@@ -31,7 +37,7 @@ PrusaSender::PrusaSender(const QJsonObject &connection)
     storage.remove(QRegularExpression("^/|/$"));
 }
 
-QNetworkRequest PrusaSender::request(const QString &path) const
+QNetworkRequest PrusaSendJob::request(const QString &path) const
 {
     auto url = origin;
     url.setPath(path);
@@ -43,7 +49,7 @@ QNetworkRequest PrusaSender::request(const QString &path) const
     return request;
 }
 
-bool PrusaSender::accepted(QNetworkReply *reply)
+bool PrusaSendJob::accepted(QNetworkReply *reply)
 {
     reply->deleteLater();
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -52,7 +58,7 @@ bool PrusaSender::accepted(QNetworkReply *reply)
     return false;
 }
 
-void PrusaSender::get(const QString &path, std::function<void(const QJsonObject &)> next)
+void PrusaSendJob::get(const QString &path, std::function<void(const QJsonObject &)> next)
 {
     auto *reply = network.get(request(path));
     connect(reply, &QNetworkReply::finished, this, [this, reply, next = std::move(next)] {
@@ -66,7 +72,7 @@ void PrusaSender::get(const QString &path, std::function<void(const QJsonObject 
     });
 }
 
-void PrusaSender::send(PrinterFile input)
+void PrusaSendJob::send(PrinterFile input)
 {
     file = std::move(input);
     emit progress("Connecting to PrusaLink…");
@@ -76,7 +82,7 @@ void PrusaSender::send(PrinterFile input)
     });
 }
 
-void PrusaSender::checkPrinter()
+void PrusaSendJob::checkPrinter()
 {
     get(modern ? "/api/v1/status" : "/api/printer", [this](const QJsonObject &status) {
         bool ready;
@@ -97,7 +103,7 @@ void PrusaSender::checkPrinter()
     });
 }
 
-void PrusaSender::chooseStorage()
+void PrusaSendJob::chooseStorage()
 {
     if (!modern) {
         if (storage.isEmpty()) storage = "local";
@@ -124,7 +130,7 @@ void PrusaSender::chooseStorage()
     });
 }
 
-void PrusaSender::upload()
+void PrusaSendJob::upload()
 {
     emit progress("Uploading to PrusaLink and requesting print…");
     QNetworkReply *reply;

@@ -17,15 +17,28 @@ struct PrinterFile {
     QByteArray gcodeMd5;
 };
 
-// One sender per request. Implementations upload the file and request printing.
+class PrinterSendJob;
+
+// One sender per registered printer. Construction and JSON loading stay offline.
 class PrinterSender : public QObject {
     Q_OBJECT
 
 public:
-    using QObject::QObject;
-    static std::unique_ptr<PrinterSender> create(const QJsonObject &connection);
+    PrinterSender();
+    ~PrinterSender() override;
+    static std::unique_ptr<PrinterSender> create(const QString &protocol);
+    virtual QString protocol() const = 0;
     virtual PrinterFile::Format fileFormat() const { return PrinterFile::Format::Gcode; }
-    virtual void send(PrinterFile file) = 0;
+    virtual bool supportsAutoLevelBed() const { return false; }
+    bool autoLevelBedEnabled() const { return autoLevelBed; }
+    void setAutoLevelBedEnabled(bool enabled) { autoLevelBed = enabled; }
+    virtual void loadJson(const QJsonObject &json);
+    virtual QJsonObject toJson() const;
+    QString name() const { return printerName; }
+    QString customPrinterId() const { return printerId; }
+    void setIdentity(const QString &id, const QString &customName, const QString &fallbackName);
+    QString connectionKey(const QJsonObject &connection) const;
+    void send(PrinterFile file, const QJsonObject &connection);
 
 signals:
     void progress(const QString &message);
@@ -33,6 +46,13 @@ signals:
     void failed(const QString &message);
 
 protected:
-    static QUrl connectionUrl(const QJsonObject &connection, const QString &scheme,
-        int defaultPort, const QString &portKey = "port");
+    virtual int defaultPort() const = 0;
+    virtual std::unique_ptr<PrinterSendJob> createJob(const QJsonObject &connection) const = 0;
+
+private:
+    QString printerId;
+    QString customName;
+    QString printerName;
+    bool autoLevelBed = true;
+    std::unique_ptr<PrinterSendJob> activeJob;
 };

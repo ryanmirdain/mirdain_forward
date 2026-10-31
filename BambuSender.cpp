@@ -12,6 +12,11 @@
 #include <stdexcept>
 #include <utility>
 
+std::unique_ptr<PrinterSendJob> BambuSender::createJob(const QJsonObject &connection) const
+{
+    return std::make_unique<BambuSendJob>(connection, autoLevelBedEnabled());
+}
+
 static QString curlQuote(QString value)
 {
     value.replace("\\", "\\\\");
@@ -21,7 +26,8 @@ static QString curlQuote(QString value)
     return "\"" + value + "\"";
 }
 
-BambuSender::BambuSender(const QJsonObject &connection)
+BambuSendJob::BambuSendJob(const QJsonObject &connection, bool autoLevelBed)
+    : PrinterSendJob(autoLevelBed)
 {
     const auto mqttUrl = connectionUrl(connection, "mqtts", 8883);
     ftpUrl = connectionUrl(connection, "ftps", 990, "ftp_port");
@@ -51,7 +57,7 @@ BambuSender::BambuSender(const QJsonObject &connection)
     });
 }
 
-void BambuSender::send(PrinterFile input)
+void BambuSendJob::send(PrinterFile input)
 {
     file = std::move(input);
     emit progress("Connecting to Bambu LAN…");
@@ -83,7 +89,7 @@ void BambuSender::send(PrinterFile input)
     mqtt.connectToHostEncrypted(tls);
 }
 
-bool BambuSender::publish(const QJsonObject &message)
+bool BambuSendJob::publish(const QJsonObject &message)
 {
     if (mqtt.publish(QMqttTopicName("device/" + serial + "/request"),
             QJsonDocument(message).toJson(QJsonDocument::Compact), 0) >= 0) return true;
@@ -91,14 +97,14 @@ bool BambuSender::publish(const QJsonObject &message)
     return false;
 }
 
-void BambuSender::checkPrinter()
+void BambuSendJob::checkPrinter()
 {
     awaitingIdle = true;
     timeout.start(15000);
     publish({{"pushing", QJsonObject{{"command", "pushall"}, {"sequence_id", "0"}, {"version", 1}, {"push_target", 1}}}});
 }
 
-void BambuSender::receive(const QJsonObject &report)
+void BambuSendJob::receive(const QJsonObject &report)
 {
     if (done) return;
     if (awaitingIdle && report.contains("gcode_state")) {
@@ -123,7 +129,7 @@ void BambuSender::receive(const QJsonObject &report)
     }
 }
 
-void BambuSender::upload()
+void BambuSendJob::upload()
 {
     timeout.stop();
     if (!archive.open() || archive.write(file.data) != file.data.size() || !archive.flush()) {
@@ -165,7 +171,7 @@ void BambuSender::upload()
     transfer.closeWriteChannel();
 }
 
-void BambuSender::startPrint()
+void BambuSendJob::startPrint()
 {
     sequence = QString::number(QRandomGenerator::global()->bounded(1u, 0x7fffffffu));
     startSent = true;
@@ -176,11 +182,11 @@ void BambuSender::startPrint()
         {"md5", QString::fromLatin1(file.gcodeMd5).toUpper()},
         {"project_id", "0"}, {"profile_id", "0"}, {"task_id", "0"}, {"subtask_id", "0"},
         {"subtask_name", file.filename}, {"plate_idx", 0}, {"bed_type", "auto"},
-        {"bed_leveling", true}, {"bed_levelling", true}, {"flow_cali", false}, {"vibration_cali", false},
+        {"bed_leveling", autoLevelBed}, {"bed_levelling", autoLevelBed}, {"flow_cali", false}, {"vibration_cali", false},
         {"layer_inspect", false}, {"timelapse", false}, {"use_ams", useAms}, {"ams_mapping", amsMapping}}}});
 }
 
-void BambuSender::finish(const QString &error)
+void BambuSendJob::finish(const QString &error)
 {
     if (done) return;
     done = true;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "PrinterSender.h"
+#include "PrinterSendJob.h"
 
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -10,7 +10,16 @@
 
 class PrusaSender : public PrinterSender {
 public:
-    explicit PrusaSender(const QJsonObject &connection);
+    QString protocol() const override { return "prusalink"; }
+
+protected:
+    int defaultPort() const override { return 80; }
+    std::unique_ptr<PrinterSendJob> createJob(const QJsonObject &connection) const override;
+};
+
+class PrusaSendJob : public PrinterSendJob {
+public:
+    explicit PrusaSendJob(const QJsonObject &connection, bool autoLevelBed);
     void send(PrinterFile file) override;
 
 private:

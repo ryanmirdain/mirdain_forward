@@ -94,6 +94,7 @@ jobs:
           package="dist/mirdain_forward-macos-${{ matrix.cpu }}"
           mkdir -p "$package"
           cp README.md "$package/README.md"
+          cp LICENSE "$package/LICENSE"
           cp build/_deps/miniz-src/LICENSE "$package/miniz-LICENSE"
           cp build-deps/qtmqtt/LICENSES/GPL-3.0-only.txt "$package/QtMqtt-LICENSE"
           ditto build/mirdain_forward.app "$package/mirdain_forward.app"
@@ -106,6 +107,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path dist -Force
           Copy-Item README.md build/Release/README.md
+          Copy-Item LICENSE build/Release/LICENSE
           Copy-Item build/_deps/miniz-src/LICENSE build/Release/miniz-LICENSE
           Copy-Item build-deps/qtmqtt/LICENSES/GPL-3.0-only.txt build/Release/QtMqtt-LICENSE
           Copy-Item "$env:VCToolsRedistDir/x64/Microsoft.VC143.CRT/*.dll" build/Release/

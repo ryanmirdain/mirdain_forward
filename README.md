@@ -1,12 +1,16 @@
 # Mirdain Forward
 
+Licensed under the [GNU General Public License v3.0](LICENSE) (GPL-3.0-only).
+Third-party components retain their respective licenses.
+
 Minimal Qt C++ menu bar / system tray app. It listens on **127.0.0.1:18744**,
 downloads a `.mirdain` archive, and sends the selected slice's **plate 0** to an
-ELEGOO, PrusaLink, or Bambu LAN printer, then requests printing. No account,
-saved configuration, or queue. Printer credentials arrive in each request.
+ELEGOO, PrusaLink, or Bambu LAN printer, then requests printing. No account or
+queue. Printer names, IDs, and settings are saved locally; printer credentials
+arrive in each request.
 
-The menu contains the current transfer status and Quit. Only one transfer runs
-at a time. Success means the printer accepted the print request, not that the
+The menu contains Printers, the current transfer status, and Quit. Only one
+transfer runs at a time. Success means the printer accepted the print request, not that the
 first layer has begun. Busy printers are not interrupted. Start commands are
 never automatically retried; after an unconfirmed start, check the printer
 before sending again.
@@ -16,19 +20,79 @@ Bambu receives the original `.gcode.3mf`. Temporary downloads are deleted after
 each transfer. Archive members are read without extracting a directory tree.
 Long menu status messages are ellipsized; the tray tooltip retains the full text.
 
+## Printer settings
+
+Printers are remembered when a valid **Send and print** request arrives. Open
+**Printers > printer name > Auto-level bed** in the menu bar / system tray to
+change its setting. It defaults to enabled and applies to subsequent requests.
+The printer settings menu is disabled during a transfer.
+
+The custom printer ID is the storage key, so renaming a printer or changing its
+connection preserves its settings. Requests without a custom printer ID use the
+protocol, hostname, and port as their key and display name instead.
+
+Settings are loaded at startup and saved atomically to `printers.json` under
+Qt's `QStandardPaths::AppDataLocation`:
+
+| Platform | Default file |
+| --- | --- |
+| macOS | `~/Library/Application Support/Mirdain Forward/printers.json` |
+| Windows | `%APPDATA%/Mirdain Forward/printers.json` |
+| Linux | `~/.local/share/Mirdain Forward/printers.json` (honors `XDG_DATA_HOME`) |
+
+For example:
+
+```json
+{
+  "printers": {
+    "custom:printer-uuid": {
+      "custom_printer_id": "printer-uuid",
+      "custom_printer_name": "Workshop Bambu",
+      "name": "Workshop Bambu",
+      "protocol": "bambu_lan",
+      "settings": {
+        "auto_level_bed": true
+      }
+    }
+  }
+}
+```
+
+Only printer identity, protocol, and settings are persisted. Download URLs,
+authorization, and printer credentials are not saved.
+For ELEGOO the setting controls SDCP `Calibration_switch` (1 or 0); for Bambu it
+controls `bed_leveling` and `bed_levelling`. PrusaLink's upload-and-print API has
+no leveling option, so its toggle is disabled and leveling follows the sliced
+G-code's start sequence.
+
 ## Adding printer protocols
 
-`PrinterSender` is the shared interface. `fileFormat()` selects plain G-code or
-the native plate archive. `send(PrinterFile)` receives the chosen bytes,
-filename, bed type, and embedded G-code path/checksum. Implementations emit
-`progress`, `completed` when the print request is accepted, or `failed`.
-Each HTTP request gets a new sender.
+`PrinterSettings` retains one `PrinterSender` in memory for each registered
+printer, including printers restored at startup. `PrinterSender::create(protocol)`
+constructs a sender without connection details or network activity. Its virtual
+`loadJson()` and `toJson()` methods restore and serialize printer identity and
+settings using the JSON format above.
 
-`ElegooSender`, `PrusaSender`, and `BambuSender` own their protocol's connection
-validation, transfer, and print request. To add another protocol, subclass
-`PrinterSender`, add its sources to CMake, and add a branch to
-`PrinterSender::create(connection)`. The HTTP handler, archive download,
-plate selection, tray status, and response flow are shared.
+The menu uses `supportsAutoLevelBed()` and `autoLevelBedEnabled()` to read each
+sender's capabilities and current value, and calls `setAutoLevelBedEnabled()`
+when the user changes it. Capability support belongs to the concrete sender;
+the menu contains no protocol-specific checks. ELEGOO and Bambu support this
+setting, while PrusaLink inherits the default unsupported capability.
+
+`fileFormat()` selects plain G-code or the native plate archive.
+`send(PrinterFile, connection)` creates a temporary `PrinterSendJob` with the
+sender's current setting. Each job owns its connection validation, sockets,
+timers, upload state, and print request, and is discarded on completion or
+failure. The retained sender survives and can send again with a fresh job.
+Constructing or restoring a sender never contacts a printer; network activity
+starts only when sending a file. Progress and completion signals are forwarded
+through the sender to the shared HTTP/tray response flow.
+
+To add another protocol, subclass `PrinterSender`, declare its protocol, default
+port, file format, and supported settings, and implement `createJob()` using a
+`PrinterSendJob` subclass. Add its sources to CMake and a branch to
+`PrinterSender::create(protocol)`. The HTTP handler, JSON persistence, archive
+download, plate selection, and settings menu remain shared.
 
 ## Build and run
 
@@ -109,6 +173,8 @@ workflow builds and packages only; it does not run tests or publish releases.
 ```json
 {
   "url": "https://example.com/download/part.mirdain",
+  "custom_printer_id": "printer-uuid",
+  "custom_printer_name": "Workshop printer",
   "connection": {
     "protocol": "elegoo_sdcp",
     "host": "10.0.0.220",
@@ -144,8 +210,9 @@ check the printer before retrying. The app does not automatically retry start.
 The port defaults to 3030. Uploads use ELEGOO's 1 MiB multipart protocol with a
 whole-file MD5 checksum. The app discovers the MainboardID over UDP port 3000,
 checks the printer is idle over WebSocket, and sends SDCP Cmd 128 with the
-uploaded `/local/` path. Automatic bed leveling is enabled, time-lapse is disabled,
-and platform type comes from the slice's bed type (textured versus smooth/cool).
+uploaded `/local/` path. Automatic bed leveling follows the saved printer setting;
+time-lapse is disabled, and platform type comes from the slice's bed type
+(textured versus smooth/cool).
 Success requires the start-command acknowledgment.
 
 ### PrusaLink (`prusalink`)
@@ -194,12 +261,17 @@ The app checks the MQTT status, uploads the native `.gcode.3mf` to the storage
 root over FTPS, checks the printer is still idle, then publishes `project_file`
 with the archive's actual `Metadata/plate_N.gcode` path and G-code MD5.
 Success requires the matching MQTT command acknowledgment, not just successful
-upload or MQTT delivery. The start request enables bed leveling and disables
-time-lapse, flow calibration, vibration calibration, and layer inspection.
+upload or MQTT delivery. The start request uses the saved bed-leveling setting
+and disables time-lapse, flow calibration, vibration calibration, and layer inspection.
 
 By default it uses the external spool (`use_ams=false`, `ams_mapping=[254]`).
 For AMS, add `"use_ams":true,"ams_mapping":[0]`: provide one global slot ID per
 sliced filament (`AMS index * 4 + slot index`, both zero-based; `-1` for unused).
+Forward passes this array directly from the request's `connection` into the
+MQTT start command. It does not derive AMS slots from the `.mirdain` manifest,
+read `Metadata/mirdain_filament_bindings.json` for mapping, or check that the
+array length matches the selected plate's filament count. The array must be in
+the native plate's slicer filament order, not the outer project's filament order.
 The preset must be sliced for the target Bambu printer. This implements the
 standard LAN `project_file` flow; firmware requiring signed commands remains
 unsupported without Developer Mode. No physical Prusa or Bambu printer was used
@@ -226,6 +298,8 @@ const response = await fetch('http://127.0.0.1:18744/send', {
     download_headers: { Authorization: `Bearer ${slicingToken}` },
     connection: mirdain_connection,
     slice_id: sliceId,
+    custom_printer_id: customPrinterId,
+    custom_printer_name: customPrinterName,
   }),
 })
 const result = await response.json()

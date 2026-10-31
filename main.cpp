@@ -1,4 +1,5 @@
 #include "PrinterSender.h"
+#include "PrinterSettings.h"
 #include "ZipArchive.h"
 
 #include <QApplication>
@@ -74,12 +75,13 @@ struct Job {
     QTemporaryFile archive;
     QString sliceId;
     QString filename;
-    std::unique_ptr<PrinterSender> sender;
+    QJsonObject connection;
+    PrinterSender *sender;
 };
 
 class Forwarder : public QObject {
 public:
-    Forwarder()
+    Forwarder() : printerSettings(*menu.addMenu("Printers"))
     {
         status = menu.addAction("Idle - 127.0.0.1:18744");
         status->setEnabled(false);
@@ -117,18 +119,20 @@ public:
                     const QUrl url(body.value("url").toString());
                     if (!url.isValid() || url.host().isEmpty() || (url.scheme() != "http" && url.scheme() != "https"))
                         throw std::runtime_error("url must be an HTTP(S) download link to a .mirdain archive.");
-                    auto sender = PrinterSender::create(connection);
+                    auto *sender = printerSettings.remember(body);
                     auto job = std::make_shared<Job>(std::move(responder));
+                    job->connection = connection;
                     job->origin = origin;
                     job->downloadAuthorization = body.value("download_headers").toObject().value("Authorization").toString().toUtf8();
-                    job->sender = std::move(sender);
-                    connect(job->sender.get(), &PrinterSender::progress, this, [this](const QString &message) {
+                    job->sender = sender;
+                    connect(sender, &PrinterSender::progress, this, [this](const QString &message) {
                         status->setText(message);
                     });
-                    connect(job->sender.get(), &PrinterSender::completed, this, [this, job] { finish(job); });
-                    connect(job->sender.get(), &PrinterSender::failed, this, [this, job](const QString &error) { finish(job, error); });
+                    connect(sender, &PrinterSender::completed, this, [this, job] { finish(job); });
+                    connect(sender, &PrinterSender::failed, this, [this, job](const QString &error) { finish(job, error); });
                     job->sliceId = body.value("slice_id").toString();
                     active = job;
+                    printerSettings.setBusy(true);
                     download(job, url);
                 } catch (const std::exception &error) {
                     responder.sendResponse(response(origin, Status::BadRequest, {{"error", error.what()}}));
@@ -146,6 +150,7 @@ private:
     QHttpServer server;
     QNetworkAccessManager network;
     QMenu menu;
+    PrinterSettings printerSettings;
     QSystemTrayIcon tray;
     QAction *status;
     std::shared_ptr<Job> active;
@@ -153,7 +158,6 @@ private:
     void finish(std::shared_ptr<Job> job, const QString &error = {})
     {
         job->sender->disconnect(this);
-        job->sender.release()->deleteLater();
         const auto message = error.isEmpty() ? "Print requested " + job->filename : error;
         status->setText(QFontMetrics(menu.font()).elidedText(message, Qt::ElideMiddle, 360));
         tray.setToolTip("Mirdain Forward - " + message);
@@ -161,6 +165,7 @@ private:
             error.isEmpty() ? QJsonObject{{"ok", true}, {"print_requested", true}, {"filename", job->filename}, {"plate", 0}}
                             : QJsonObject{{"error", error}}));
         active.reset();
+        printerSettings.setBusy(false);
     }
 
     void download(const std::shared_ptr<Job> &job, const QUrl &url)
@@ -220,7 +225,7 @@ private:
                 job->filename.replace(QRegularExpression("[^A-Za-z0-9._-]"), "_");
                 const auto md5 = QCryptographicHash::hash(gcode, QCryptographicHash::Md5).toHex();
                 job->sender->send({native ? std::move(package) : std::move(gcode), job->filename,
-                    slice.value("bed_type").toString(), native ? gcodePath : QString{}, md5});
+                    slice.value("bed_type").toString(), native ? gcodePath : QString{}, md5}, job->connection);
             } catch (const std::exception &error) {
                 finish(job, QString::fromUtf8(error.what()));
             }
@@ -233,10 +238,15 @@ int main(int argc, char **argv)
     QApplication app(argc, argv);
     QApplication::setApplicationName("Mirdain Forward");
     QApplication::setQuitOnLastWindowClosed(false);
-    Forwarder forwarder;
-    if (!forwarder.listen()) {
-        QMessageBox::critical(nullptr, "Mirdain Forward", "Cannot listen on 127.0.0.1:18744. Is Mirdain Forward already running?");
+    try {
+        Forwarder forwarder;
+        if (!forwarder.listen()) {
+            QMessageBox::critical(nullptr, "Mirdain Forward", "Cannot listen on 127.0.0.1:18744. Is Mirdain Forward already running?");
+            return 1;
+        }
+        return app.exec();
+    } catch (const std::exception &error) {
+        QMessageBox::critical(nullptr, "Mirdain Forward", QString::fromUtf8(error.what()));
         return 1;
     }
-    return app.exec();
 }
