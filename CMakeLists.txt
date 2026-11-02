@@ -34,7 +34,11 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/printers/PrusaSender.h src/printers/PrusaSender.cpp
     src/printers/BambuSender.h src/printers/BambuSender.cpp
 )
-qt_add_resources(mirdain_forward assets PREFIX "/" FILES assets/mirdain-mark.png)
+qt_add_resources(mirdain_forward assets PREFIX "/" FILES
+    assets/mirdain-mark.png
+    assets/fonts/Aileron-Regular.otf
+    assets/fonts/Aileron-SemiBold.otf
+)
 target_include_directories(mirdain_forward PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(mirdain_forward PRIVATE cxx_std_17)
 target_link_libraries(mirdain_forward PRIVATE Qt6::Widgets Qt6::Network Qt6::HttpServer Qt6::WebSockets Qt6::Mqtt miniz)
