@@ -1,10 +1,14 @@
-#include "PrinterSender.h"
-#include "PrinterSettings.h"
-#include "ZipArchive.h"
+#include "app/AppConfig.h"
+#include "app/AppPreferences.h"
+#include "platform/NotificationSender.h"
+#include "printers/PrinterSender.h"
+#include "printers/PrinterSettings.h"
+#include "archive/ZipArchive.h"
 
 #include <QApplication>
 #include <QBuffer>
 #include <QCryptographicHash>
+#include <QDir>
 #include <QFileInfo>
 #include <QFontMetrics>
 #include <QHttpServer>
@@ -14,14 +18,17 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLockFile>
 #include <QMenu>
 #include <QMessageBox>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QRegularExpression>
+#include <QStandardPaths>
 #include <QSystemTrayIcon>
 #include <QTcpServer>
 #include <QTemporaryFile>
+#include <QTimer>
 
 #include <memory>
 #include <stdexcept>
@@ -81,7 +88,7 @@ struct Job {
 
 class Forwarder : public QObject {
 public:
-    Forwarder() : printerSettings(*menu.addMenu("Printers"))
+    Forwarder() : printerSettings(config, *menu.addMenu("Printers"))
     {
         status = menu.addAction("Idle - 127.0.0.1:18744");
         status->setEnabled(false);
@@ -133,6 +140,8 @@ public:
                     job->sliceId = body.value("slice_id").toString();
                     active = job;
                     printerSettings.setBusy(true);
+                    if (preferences.notificationsEnabled())
+                        notifications.send("Print request received", "Preparing Plate 1 for " + sender->name() + ".");
                     download(job, url);
                 } catch (const std::exception &error) {
                     responder.sendResponse(response(origin, Status::BadRequest, {{"error", error.what()}}));
@@ -146,12 +155,17 @@ public:
         return listener->listen(QHostAddress::LocalHost, Port) && server.bind(listener);
     }
 
+    void promptOnFirstLaunch() { preferences.promptOnFirstLaunch(); }
+
 private:
     QHttpServer server;
     QNetworkAccessManager network;
     QMenu menu;
+    AppConfig config;
     PrinterSettings printerSettings;
     QSystemTrayIcon tray;
+    NotificationSender notifications{tray};
+    AppPreferences preferences{config, notifications, menu};
     QAction *status;
     std::shared_ptr<Job> active;
 
@@ -239,11 +253,21 @@ int main(int argc, char **argv)
     QApplication::setApplicationName("Mirdain Forward");
     QApplication::setQuitOnLastWindowClosed(false);
     try {
+        const auto directory = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        if (!QDir().mkpath(directory))
+            throw std::runtime_error(("Cannot create app directory: " + directory).toStdString());
+        QLockFile lock(QDir(directory).filePath("forward.lock"));
+        lock.setStaleLockTime(0);
+        if (!lock.tryLock(0)) {
+            if (lock.error() == QLockFile::LockFailedError) return 0;
+            throw std::runtime_error("Cannot lock Mirdain Forward's app directory.");
+        }
         Forwarder forwarder;
         if (!forwarder.listen()) {
             QMessageBox::critical(nullptr, "Mirdain Forward", "Cannot listen on 127.0.0.1:18744. Is Mirdain Forward already running?");
             return 1;
         }
+        QTimer::singleShot(0, &forwarder, &Forwarder::promptOnFirstLaunch);
         return app.exec();
     } catch (const std::exception &error) {
         QMessageBox::critical(nullptr, "Mirdain Forward", QString::fromUtf8(error.what()));

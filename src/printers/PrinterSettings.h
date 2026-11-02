@@ -1,23 +1,23 @@
 #pragma once
 
-#include "PrinterSender.h"
+#include "printers/PrinterSender.h"
 
 #include <map>
 
 class QMenu;
+class AppConfig;
 
 class PrinterSettings {
 public:
-    explicit PrinterSettings(QMenu &menu);
+    PrinterSettings(AppConfig &config, QMenu &menu);
     PrinterSender *remember(const QJsonObject &request);
     void setBusy(bool busy);
 
 private:
     QMenu &menu;
-    QString path;
+    AppConfig &config;
     std::map<QString, std::unique_ptr<PrinterSender>> printers;
 
     QJsonObject toJson() const;
-    void save(const QJsonObject &updated) const;
     void rebuildMenu();
 };

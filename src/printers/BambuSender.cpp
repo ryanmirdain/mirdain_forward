@@ -1,4 +1,4 @@
-#include "BambuSender.h"
+#include "printers/BambuSender.h"
 
 #include <QJsonDocument>
 #include <QDir>

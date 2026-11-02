@@ -1,34 +1,19 @@
-#include "PrinterSettings.h"
+#include "printers/PrinterSettings.h"
+#include "app/AppConfig.h"
 
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
-#include <QJsonDocument>
 #include <QMenu>
 #include <QMessageBox>
-#include <QSaveFile>
-#include <QStandardPaths>
 
 #include <stdexcept>
 
-PrinterSettings::PrinterSettings(QMenu &printerMenu) : menu(printerMenu)
+PrinterSettings::PrinterSettings(AppConfig &config, QMenu &printerMenu) : menu(printerMenu), config(config)
 {
-    path = QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath("printers.json");
-    QFile file(path);
-    if (file.exists()) {
-        if (!file.open(QIODevice::ReadOnly)) throw std::runtime_error(file.errorString().toStdString());
-        QJsonParseError error;
-        const auto document = QJsonDocument::fromJson(file.readAll(), &error);
-        if (error.error != QJsonParseError::NoError || !document.isObject()
-            || !document.object().value("printers").isObject())
-            throw std::runtime_error(("Invalid printer settings: " + path).toStdString());
-        const auto saved = document.object().value("printers").toObject();
-        for (auto it = saved.constBegin(); it != saved.constEnd(); ++it) {
-            const auto json = it.value().toObject();
-            auto sender = PrinterSender::create(json.value("protocol").toString());
-            sender->loadJson(json);
-            printers.emplace(it.key(), std::move(sender));
-        }
+    const auto saved = config.section("printers");
+    for (auto it = saved.constBegin(); it != saved.constEnd(); ++it) {
+        const auto json = it.value().toObject();
+        auto sender = PrinterSender::create(json.value("protocol").toString());
+        sender->loadJson(json);
+        printers.emplace(it.key(), std::move(sender));
     }
     rebuildMenu();
 }
@@ -38,16 +23,6 @@ QJsonObject PrinterSettings::toJson() const
     QJsonObject json;
     for (const auto &[key, sender] : printers) json.insert(key, sender->toJson());
     return json;
-}
-
-void PrinterSettings::save(const QJsonObject &updated) const
-{
-    if (!QDir().mkpath(QFileInfo(path).absolutePath()))
-        throw std::runtime_error(("Cannot create printer settings directory: " + path).toStdString());
-    QSaveFile file(path);
-    const auto data = QJsonDocument(QJsonObject{{"printers", updated}}).toJson();
-    if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit())
-        throw std::runtime_error(("Cannot save printer settings: " + file.errorString()).toStdString());
 }
 
 PrinterSender *PrinterSettings::remember(const QJsonObject &request)
@@ -64,7 +39,7 @@ PrinterSender *PrinterSettings::remember(const QJsonObject &request)
     if (existing == printers.end() || existing->second->toJson() != json) {
         auto updated = toJson();
         updated.insert(key, json);
-        save(updated);
+        config.setSection("printers", updated);
         if (existing != printers.end() && existing->second->protocol() == candidate->protocol())
             existing->second->loadJson(json);
         else
@@ -101,7 +76,7 @@ void PrinterSettings::rebuildMenu()
             const bool previous = sender->autoLevelBedEnabled();
             sender->setAutoLevelBedEnabled(enabled);
             try {
-                save(toJson());
+                config.setSection("printers", toJson());
             } catch (const std::exception &error) {
                 sender->setAutoLevelBedEnabled(previous);
                 level->setChecked(previous);

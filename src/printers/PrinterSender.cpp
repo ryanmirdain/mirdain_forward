@@ -1,8 +1,8 @@
-#include "PrinterSender.h"
-#include "PrinterSendJob.h"
-#include "ElegooSender.h"
-#include "PrusaSender.h"
-#include "BambuSender.h"
+#include "printers/PrinterSender.h"
+#include "printers/PrinterSendJob.h"
+#include "printers/ElegooSender.h"
+#include "printers/PrusaSender.h"
+#include "printers/BambuSender.h"
 
 #include <stdexcept>
 #include <utility>

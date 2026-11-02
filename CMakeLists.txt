@@ -21,21 +21,26 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Network HttpServer WebSockets M
 qt_standard_project_setup()
 
 qt_add_executable(mirdain_forward MACOSX_BUNDLE
-    main.cpp
-    PrinterSettings.h PrinterSettings.cpp
-    PrinterSendJob.h
-    PrinterSender.h PrinterSender.cpp
-    ElegooSender.h ElegooSender.cpp
-    PrusaSender.h PrusaSender.cpp
-    BambuSender.h BambuSender.cpp
-    ZipArchive.h ZipArchive.cpp
+    src/main.cpp
+    src/app/AppConfig.h src/app/AppConfig.cpp
+    src/app/AppPreferences.h src/app/AppPreferences.cpp
+    src/archive/ZipArchive.h src/archive/ZipArchive.cpp
+    src/platform/StartupRegistration.h
+    src/platform/NotificationSender.h
+    src/printers/PrinterSettings.h src/printers/PrinterSettings.cpp
+    src/printers/PrinterSendJob.h
+    src/printers/PrinterSender.h src/printers/PrinterSender.cpp
+    src/printers/ElegooSender.h src/printers/ElegooSender.cpp
+    src/printers/PrusaSender.h src/printers/PrusaSender.cpp
+    src/printers/BambuSender.h src/printers/BambuSender.cpp
 )
 qt_add_resources(mirdain_forward assets PREFIX "/" FILES assets/mirdain-mark.png)
+target_include_directories(mirdain_forward PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(mirdain_forward PRIVATE cxx_std_17)
 target_link_libraries(mirdain_forward PRIVATE Qt6::Widgets Qt6::Network Qt6::HttpServer Qt6::WebSockets Qt6::Mqtt miniz)
 set_target_properties(mirdain_forward PROPERTIES
     WIN32_EXECUTABLE TRUE
-    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/Info.plist.in"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.mirdainsystems.forward"
     MACOSX_BUNDLE_BUNDLE_NAME "Mirdain Forward"
     MACOSX_BUNDLE_ICON_FILE "Icon.icns"
@@ -44,11 +49,24 @@ set_target_properties(mirdain_forward PROPERTIES
 )
 
 if(APPLE)
+    enable_language(OBJCXX)
+    target_sources(mirdain_forward PRIVATE
+        src/platform/macos/NotificationSender.mm
+        src/platform/macos/StartupRegistration.mm
+    )
+    set_source_files_properties(
+        src/platform/macos/NotificationSender.mm
+        src/platform/macos/StartupRegistration.mm
+        PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
+    )
+    find_library(user_notifications UserNotifications REQUIRED)
+    find_library(service_management ServiceManagement REQUIRED)
+    target_link_libraries(mirdain_forward PRIVATE "${user_notifications}" "${service_management}")
     target_sources(mirdain_forward PRIVATE assets/Icon.icns)
     set_source_files_properties(assets/Icon.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     set_property(TARGET mirdain_forward APPEND PROPERTY LINK_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/Icon.icns"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
+        "${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/Info.plist.in"
     )
     get_filename_component(qt_prefix "${Qt6_DIR}/../../.." ABSOLUTE)
     find_program(macdeployqt macdeployqt HINTS "${qt_prefix}/bin" REQUIRED)
@@ -75,10 +93,20 @@ if(APPLE)
         COMMENT "Bundling Qt frameworks and plugins"
         VERBATIM
     )
+elseif(WIN32)
+    target_sources(mirdain_forward PRIVATE
+        src/platform/windows/NotificationSender.cpp
+        src/platform/windows/StartupRegistration.cpp
+    )
+else()
+    target_sources(mirdain_forward PRIVATE
+        src/platform/generic/NotificationSender.cpp
+        src/platform/generic/StartupRegistration.cpp
+    )
 endif()
 
 if(WIN32)
-    configure_file(assets/windows.rc.in "${CMAKE_CURRENT_BINARY_DIR}/windows.rc" @ONLY)
+    configure_file(packaging/windows/windows.rc.in "${CMAKE_CURRENT_BINARY_DIR}/windows.rc" @ONLY)
     target_sources(mirdain_forward PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/windows.rc")
     if(MSVC)
         target_compile_options(mirdain_forward PRIVATE /utf-8)

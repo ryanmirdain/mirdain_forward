@@ -1,6 +1,6 @@
 #pragma once
 
-#include "PrinterSender.h"
+#include "printers/PrinterSender.h"
 
 // Temporary transport state for one print. Constructing a job does not connect.
 class PrinterSendJob : public QObject {

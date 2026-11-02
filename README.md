@@ -9,7 +9,7 @@ ELEGOO, PrusaLink, or Bambu LAN printer, then requests printing. No account or
 queue. Printer names, IDs, and settings are saved locally; printer credentials
 arrive in each request.
 
-The menu contains Printers, the current transfer status, and Quit. Only one
+The menu contains Printers, Preferences, the current transfer status, and Quit. Only one
 transfer runs at a time. Success means the printer accepted the print request, not that the
 first layer has begun. Busy printers are not interrupted. Start commands are
 never automatically retried; after an unconfirmed start, check the printer
@@ -19,6 +19,78 @@ ELEGOO and PrusaLink receive the plain `.gcode` inside the native plate package;
 Bambu receives the original `.gcode.3mf`. Temporary downloads are deleted after
 each transfer. Archive members are read without extracting a directory tree.
 Long menu status messages are ellipsized; the tray tooltip retains the full text.
+
+## Startup and notification preferences
+
+On the first successful launch, Forward asks whether to **launch when you sign
+in** and **notify you when a plate is sent through Forward**. Both choices default
+to off. Save your choices, or choose **Skip** to keep the defaults; either option
+dismisses setup for future launches. Closing the setup dialog also skips it.
+Choose **Preferences…** from the menu bar / system tray to change either choice
+later. Existing users see the setup dialog once after updating.
+
+Automatic startup is registered only when you explicitly enable it. On macOS
+13+, `src/platform/macos/StartupRegistration.mm` uses ServiceManagement's
+[`SMAppService.mainAppService`](https://developer.apple.com/documentation/servicemanagement/smappservice/mainapp?language=objc)
+to register the existing menu bar app, without a separate helper. If macOS needs
+approval, Forward directs you to Login Items in System Settings. Earlier macOS
+versions and Linux show the startup option as unavailable.
+
+On Windows, `src/platform/windows/StartupRegistration.cpp` uses Qt's `QSettings` registry support
+to store the quoted executable path as **Mirdain Forward** in
+[`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`](https://learn.microsoft.com/en-us/windows/win32/setupapi/run-and-runonce-registry-keys).
+It affects only the current user and requires no administrator access. Disabling
+the option removes that value. Windows may delay startup after sign-in.
+
+Move the macOS app or extract the complete Windows app folder to its permanent
+location before enabling startup. After moving a registered Windows app, disable
+and re-enable startup from the new location to update the path. Preferences also
+offers **Open startup settings…**. The Windows checkbox indicates the Run entry
+is registered; Windows Settings or Task Manager can disable it separately.
+Forward never re-registers startup merely because it launches or its saved
+preference is enabled, so OS-level changes are respected. Reopening Forward
+while it is already running exits quietly.
+
+`AppPreferences` owns the shared setup/preferences dialog. `StartupRegistration`
+and `NotificationSender` provide platform-specific behavior behind shared class
+interfaces. `AppConfig` reads and atomically writes sections of the existing
+`printers.json`, preserving both printer settings and app preferences:
+
+```json
+{
+  "printers": {},
+  "preferences": {
+    "setup_complete": true,
+    "launch_at_sign_in": false,
+    "notifications_enabled": false
+  }
+}
+```
+
+The saved startup choice records the user's last selection; the preferences UI
+reads current OS registration instead of automatically applying that choice.
+Older files containing only `printers` remain readable.
+
+## Notifications
+
+When notifications are enabled in Preferences, Forward sends one desktop
+notification when it accepts a **Send and print**
+request, before downloading the archive: **Print request received**, followed by
+the printer name. This confirms receipt, not that printing has started. Rejected
+requests do not notify, and progress, success, and failure do not send additional
+notifications.
+
+On macOS, saving Preferences with notifications enabled asks for notification
+permission. Receiving a plate never requests permission. If permission was
+denied, saving with notifications enabled explains how to enable it in **System
+Settings > Notifications > Mirdain Forward**. Forward requests banners without sound.
+Windows and Linux use Qt's system tray notifications and the desktop's existing
+notification settings. System settings or Focus mode may suppress notifications.
+Turning off notifications in Preferences suppresses delivery on every platform.
+
+`NotificationSender` hides permission handling and platform delivery from the
+shared request handler. macOS uses UserNotifications through Objective-C++;
+other platforms use `QSystemTrayIcon::showMessage()`.
 
 ## Printer settings
 
@@ -31,7 +103,7 @@ The custom printer ID is the storage key, so renaming a printer or changing its
 connection preserves its settings. Requests without a custom printer ID use the
 protocol, hostname, and port as their key and display name instead.
 
-Settings are loaded at startup and saved atomically to `printers.json` under
+Settings and app preferences are loaded at startup and saved atomically to `printers.json` under
 Qt's `QStandardPaths::AppDataLocation`:
 
 | Platform | Default file |
@@ -58,12 +130,33 @@ For example:
 }
 ```
 
-Only printer identity, protocol, and settings are persisted. Download URLs,
+Only printer identity, protocol, printer settings, and app preferences are persisted. Download URLs,
 authorization, and printer credentials are not saved.
 For ELEGOO the setting controls SDCP `Calibration_switch` (1 or 0); for Bambu it
 controls `bed_leveling` and `bed_levelling`. PrusaLink's upload-and-print API has
 no leveling option, so its toggle is disabled and leveling follows the sliced
 G-code's start sequence.
+
+## Source layout
+
+```text
+src/
+  main.cpp              HTTP forwarding and app lifecycle
+  app/                  Shared JSON config and preferences UI
+  archive/              ZIP archive reader
+  platform/             Startup and notification interfaces
+    macos/              Native macOS implementations
+    windows/            Windows startup registration and Qt notifications
+    generic/            Fallback notifications and unsupported startup
+  printers/             Printer settings, senders, and send jobs
+packaging/
+  macos/                App bundle Info.plist template
+  windows/              Executable resource template
+assets/                 App icons and tray artwork
+```
+
+CMake selects the platform implementations. Project headers use paths relative
+to `src/`, such as `platform/NotificationSender.h` and `printers/PrinterSender.h`.
 
 ## Adding printer protocols
 
@@ -88,7 +181,8 @@ Constructing or restoring a sender never contacts a printer; network activity
 starts only when sending a file. Progress and completion signals are forwarded
 through the sender to the shared HTTP/tray response flow.
 
-To add another protocol, subclass `PrinterSender`, declare its protocol, default
+To add another protocol, add its sources under `src/printers/`, subclass
+`PrinterSender`, declare its protocol, default
 port, file format, and supported settings, and implement `createJob()` using a
 `PrinterSendJob` subclass. Add its sources to CMake and a branch to
 `PrinterSender::create(protocol)`. The HTTP handler, JSON persistence, archive

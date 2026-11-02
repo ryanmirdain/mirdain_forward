@@ -1,4 +1,4 @@
-#include "PrusaSender.h"
+#include "printers/PrusaSender.h"
 
 #include <QAuthenticator>
 #include <QHttpMultiPart>

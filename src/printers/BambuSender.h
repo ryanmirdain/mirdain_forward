@@ -1,6 +1,6 @@
 #pragma once
 
-#include "PrinterSendJob.h"
+#include "printers/PrinterSendJob.h"
 
 #include <QMqttClient>
 #include <QJsonArray>

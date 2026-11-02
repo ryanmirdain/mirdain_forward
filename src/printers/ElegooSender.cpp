@@ -1,4 +1,4 @@
-#include "ElegooSender.h"
+#include "printers/ElegooSender.h"
 
 #include <QDateTime>
 #include <QHttpMultiPart>
