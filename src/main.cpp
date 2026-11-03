@@ -88,7 +88,7 @@ struct Job {
 
 class Forwarder : public QObject {
 public:
-    Forwarder() : printerSettings(config, *menu.addMenu("Printers"))
+    Forwarder() : printerSettings(config, menu)
     {
         status = menu.addAction("Idle - 127.0.0.1:18744");
         status->setEnabled(false);

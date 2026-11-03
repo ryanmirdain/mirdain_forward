@@ -9,7 +9,7 @@ ELEGOO, PrusaLink, or Bambu LAN printer, then requests printing. No account or
 queue. Printer names, IDs, and settings are saved locally; printer credentials
 arrive in each request.
 
-The menu contains Printers, Preferences, the current transfer status, and Quit. Only one
+The menu lists each printer directly, followed by Preferences, the current transfer status, and Quit. Only one
 transfer runs at a time. Success means the printer accepted the print request, not that the
 first layer has begun. Busy printers are not interrupted. Start commands are
 never automatically retried; after an unconfirmed start, check the printer
@@ -95,9 +95,9 @@ other platforms use `QSystemTrayIcon::showMessage()`.
 ## Printer settings
 
 Printers are remembered when a valid **Send and print** request arrives. Open
-**Printers > printer name > Auto-level bed** in the menu bar / system tray to
+**printer name > Auto-level bed** in the menu bar / system tray to
 change its setting. It defaults to enabled and applies to subsequent requests.
-The printer settings menu is disabled during a transfer.
+The printer submenus are disabled during a transfer.
 
 The custom printer ID is the storage key, so renaming a printer or changing its
 connection preserves its settings. Requests without a custom printer ID use the
@@ -191,12 +191,12 @@ download, plate selection, and settings menu remain shared.
 ## Build and run
 
 Requires Qt 6.8+ with Widgets, Network, HTTP Server, WebSockets, and MQTT, CMake,
-a C/C++17 compiler, and `curl` with FTPS support. CMake downloads and statically
+a C/C++17 compiler, and OpenSSL 3 development libraries. CMake downloads and statically
 links a pinned miniz 3.1.2 source archive on first configure; no external unzip
 tool is needed. Dependency examples, fuzzers, and tests are disabled.
-Bambu uploads run curl as a subprocess; credentials go through stdin rather than
-process arguments. macOS uses `/usr/bin/curl`; Windows uses the operating system's
-`System32/curl.exe`; Linux finds curl on PATH.
+Bambu uploads use Qt's OpenSSL TLS backend directly, with TLS session reuse
+between the control and data connections. macOS and Windows builds bundle the
+OpenSSL runtime. Credentials stay in memory rather than process arguments.
 
 ### macOS
 
@@ -214,26 +214,25 @@ Allow local network access if macOS requests it.
 
 ### Windows
 
-Install Visual Studio 2022 C++ build tools and Qt's MSVC 2022 x64 kit, including
+Install Visual Studio 2022 C++ build tools, OpenSSL 3 for x64, and Qt's MSVC 2022 x64 kit, including
 the HTTP Server, WebSockets, and Image Formats modules. Build and install the
 matching Qt MQTT module from source as shown in the workflow below; it is not
 included in the public SDK binaries. From a Visual Studio developer PowerShell
-prompt (adjust the Qt path for your installation):
+prompt (adjust the Qt and OpenSSL paths for your installation):
 
 ```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH=C:/Qt/6.9.2/msvc2022_64
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH=C:/Qt/6.9.2/msvc2022_64 -DOPENSSL_ROOT_DIR="C:/Program Files/OpenSSL-Win64"
 cmake --build build --config Release --parallel
 .\build\Release\mirdain_forward.exe
 ```
 
-Each link runs `windeployqt` to copy Qt DLLs, plugins, and compiler runtime files
+Each link runs `windeployqt` to copy Qt DLLs, OpenSSL DLLs, plugins, and compiler runtime files
 beside the executable. Distribute the whole `build/Release` folder. The executable
 uses the supplied app icon and runs in the system tray without a console window.
-Windows 10/11 supplies curl; printer credentials and the localhost API work the
-same way as on macOS.
+Printer credentials and the localhost API work the same way as on macOS.
 
 On Linux, use your Qt installation's CMake prefix and run `build/mirdain_forward`
-in a desktop environment with a system tray and curl installed.
+in a desktop environment with a system tray and the OpenSSL 3 runtime installed.
 
 ## GitHub Actions builds
 
@@ -351,9 +350,21 @@ See [Bambu's Developer Mode explanation](https://blog.bambulab.com/updates-and-t
 990. Both services authenticate as `bblp` with the LAN access code. The app accepts
 the printer's self-signed TLS certificate for these LAN connections.
 
-The app checks the MQTT status, uploads the native `.gcode.3mf` to the storage
-root over FTPS, checks the printer is still idle, then publishes `project_file`
-with the archive's actual `Metadata/plate_N.gcode` path and G-code MD5.
+The app checks the MQTT status, uploads the native `.gcode.3mf` over FTPS,
+checks the printer is still idle, then publishes `project_file` with the archive's
+actual `Metadata/plate_N.gcode` path and G-code MD5. The archive's
+`Metadata/project_settings.config` identifies the printer model: H2D/X2D use the
+storage root and `ftp:///` print URLs; other models use `/cache` and
+`file:///sdcard/cache/` URLs, matching `mirdain_printer_client`. Missing model
+metadata defaults to `/cache`.
+
+FTPS reuses the control TLS session for the passive data connection. As in the
+printer client, servers advertising `vsFTPd` receive TLS `close_notify`; other
+servers, including P1P, get a direct data-socket close to avoid hanging on TLS
+shutdown. Uploads show percentage progress, fail after 15 seconds without data
+progress or a command reply, and have a 180-second overall limit. Success still
+requires the server's final FTP completion reply. P1P/P1S allow 180 seconds for
+the subsequent print acknowledgment; other models allow 30 seconds.
 Success requires the matching MQTT command acknowledgment, not just successful
 upload or MQTT delivery. The start request uses the saved bed-leveling setting
 and disables time-lapse, flow calibration, vibration calibration, and layer inspection.

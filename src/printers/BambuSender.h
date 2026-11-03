@@ -1,11 +1,10 @@
 #pragma once
 
 #include "printers/PrinterSendJob.h"
+#include "printers/BambuFtpsUpload.h"
 
 #include <QMqttClient>
 #include <QJsonArray>
-#include <QProcess>
-#include <QTemporaryFile>
 #include <QTimer>
 
 class BambuSender : public PrinterSender {
@@ -26,13 +25,14 @@ public:
 
 private:
     QMqttClient mqtt;
-    QProcess transfer;
-    QTemporaryFile archive;
+    BambuFtpsUpload transfer;
     QTimer timeout;
     QUrl ftpUrl;
     QString serial;
     QString accessCode;
     QString sequence;
+    QString printUrlPrefix;
+    int startTimeout = 30000;
     QJsonArray amsMapping;
     bool useAms = false;
     PrinterFile file;

@@ -18,6 +18,7 @@ FetchContent_Declare(miniz
 FetchContent_MakeAvailable(miniz)
 
 find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Network HttpServer WebSockets Mqtt)
+find_package(OpenSSL 3 REQUIRED)
 qt_standard_project_setup()
 
 qt_add_executable(mirdain_forward MACOSX_BUNDLE
@@ -33,6 +34,7 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/printers/ElegooSender.h src/printers/ElegooSender.cpp
     src/printers/PrusaSender.h src/printers/PrusaSender.cpp
     src/printers/BambuSender.h src/printers/BambuSender.cpp
+    src/printers/BambuFtpsUpload.h src/printers/BambuFtpsUpload.cpp
 )
 qt_add_resources(mirdain_forward assets PREFIX "/" FILES
     assets/mirdain-mark.png
@@ -41,7 +43,7 @@ qt_add_resources(mirdain_forward assets PREFIX "/" FILES
 )
 target_include_directories(mirdain_forward PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(mirdain_forward PRIVATE cxx_std_17)
-target_link_libraries(mirdain_forward PRIVATE Qt6::Widgets Qt6::Network Qt6::HttpServer Qt6::WebSockets Qt6::Mqtt miniz)
+target_link_libraries(mirdain_forward PRIVATE Qt6::Widgets Qt6::Network Qt6::HttpServer Qt6::WebSockets Qt6::Mqtt miniz OpenSSL::SSL)
 set_target_properties(mirdain_forward PROPERTIES
     WIN32_EXECUTABLE TRUE
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/Info.plist.in"
@@ -53,6 +55,8 @@ set_target_properties(mirdain_forward PROPERTIES
 )
 
 if(APPLE)
+    # TLS and platform plugins must resolve the bundled libraries first.
+    set_property(TARGET mirdain_forward APPEND PROPERTY BUILD_RPATH "@executable_path/../Frameworks")
     enable_language(OBJCXX)
     target_sources(mirdain_forward PRIVATE
         src/platform/macos/NotificationSender.mm
@@ -68,6 +72,8 @@ if(APPLE)
     target_link_libraries(mirdain_forward PRIVATE "${user_notifications}" "${service_management}")
     target_sources(mirdain_forward PRIVATE assets/Icon.icns)
     set_source_files_properties(assets/Icon.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    target_sources(mirdain_forward PRIVATE packaging/OpenSSL-LICENSE.txt)
+    set_source_files_properties(packaging/OpenSSL-LICENSE.txt PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     set_property(TARGET mirdain_forward APPEND PROPERTY LINK_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/Icon.icns"
         "${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/Info.plist.in"
@@ -116,9 +122,12 @@ if(WIN32)
         target_compile_options(mirdain_forward PRIVATE /utf-8)
     endif()
     find_program(windeployqt windeployqt HINTS "${Qt6_DIR}/../../../bin" REQUIRED)
+    get_filename_component(openssl_root "${OPENSSL_INCLUDE_DIR}" DIRECTORY)
     add_custom_command(TARGET mirdain_forward POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/packaging/OpenSSL-LICENSE.txt" "$<TARGET_FILE_DIR:mirdain_forward>/OpenSSL-LICENSE.txt"
         COMMAND "${windeployqt}" "$<IF:$<CONFIG:Debug>,--debug,--release>"
-            --compiler-runtime --no-translations "$<TARGET_FILE:mirdain_forward>"
+            --compiler-runtime --no-translations --openssl-root "${openssl_root}" "$<TARGET_FILE:mirdain_forward>"
         COMMENT "Bundling Qt DLLs and plugins"
         VERBATIM
     )

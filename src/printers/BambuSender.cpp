@@ -1,12 +1,12 @@
 #include "printers/BambuSender.h"
+#include "archive/ZipArchive.h"
 
+#include <QBuffer>
 #include <QJsonDocument>
-#include <QDir>
 #include <QMqttSubscription>
 #include <QRandomGenerator>
 #include <QSslConfiguration>
 #include <QSslSocket>
-#include <QStandardPaths>
 #include <QUuid>
 
 #include <stdexcept>
@@ -17,15 +17,6 @@ std::unique_ptr<PrinterSendJob> BambuSender::createJob(const QJsonObject &connec
     return std::make_unique<BambuSendJob>(connection, autoLevelBedEnabled());
 }
 
-static QString curlQuote(QString value)
-{
-    value.replace("\\", "\\\\");
-    value.replace("\"", "\\\"");
-    value.replace("\r", "\\r");
-    value.replace("\n", "\\n");
-    return "\"" + value + "\"";
-}
-
 BambuSendJob::BambuSendJob(const QJsonObject &connection, bool autoLevelBed)
     : PrinterSendJob(autoLevelBed)
 {
@@ -33,7 +24,8 @@ BambuSendJob::BambuSendJob(const QJsonObject &connection, bool autoLevelBed)
     ftpUrl = connectionUrl(connection, "ftps", 990, "ftp_port");
     serial = connection.value("serial_number").toString().trimmed();
     accessCode = connection.value("access_code").toString().trimmed();
-    if (serial.isEmpty() || serial.contains('/') || serial.contains('+') || serial.contains('#') || accessCode.isEmpty())
+    if (serial.isEmpty() || serial.contains('/') || serial.contains('+') || serial.contains('#')
+        || accessCode.isEmpty() || accessCode.contains('\r') || accessCode.contains('\n'))
         throw std::runtime_error("Bambu LAN requires serial_number and access_code from the printer's LAN settings.");
     useAms = connection.value("use_ams").toBool();
     amsMapping = connection.value("ams_mapping").toArray();
@@ -60,6 +52,17 @@ BambuSendJob::BambuSendJob(const QJsonObject &connection, bool autoLevelBed)
 void BambuSendJob::send(PrinterFile input)
 {
     file = std::move(input);
+    // Match the printer client's paths using the model from the native archive.
+    QBuffer buffer(&file.data);
+    buffer.open(QIODevice::ReadOnly);
+    ZipArchive plate(buffer);
+    QString model;
+    if (plate.members().contains("Metadata/project_settings.config"))
+        model = QJsonDocument::fromJson(plate.read("Metadata/project_settings.config"))
+            .object().value("printer_model").toString();
+    const bool root = model == "Bambu Lab H2D" || model == "Bambu Lab X2D";
+    printUrlPrefix = root ? "ftp:///" : "file:///sdcard/cache/";
+    if (model == "Bambu Lab P1P" || model == "Bambu Lab P1S") startTimeout = 180000;
     emit progress("Connecting to Bambu LAN…");
     connect(&mqtt, &QMqttClient::connected, this, [this] {
         auto *subscription = mqtt.subscribe(QMqttTopicFilter("device/" + serial + "/report"));
@@ -132,43 +135,16 @@ void BambuSendJob::receive(const QJsonObject &report)
 void BambuSendJob::upload()
 {
     timeout.stop();
-    if (!archive.open() || archive.write(file.data) != file.data.size() || !archive.flush()) {
-        finish("Cannot write the temporary Bambu plate archive.");
-        return;
-    }
-    archive.close(); // Let curl open the file on Windows as well as macOS.
     emit progress("Uploading Bambu plate over FTPS…");
-    ftpUrl.setPath("/" + file.filename);
-    connect(&transfer, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-        if (error == QProcess::FailedToStart) finish("Cannot launch curl for the Bambu FTPS upload: " + transfer.errorString());
-    });
-    connect(&transfer, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
+    connect(&transfer, &BambuFtpsUpload::progress, this, &PrinterSendJob::progress);
+    connect(&transfer, &BambuFtpsUpload::failed, this, &BambuSendJob::finish);
+    connect(&transfer, &BambuFtpsUpload::completed, this, [this] {
         if (done) return;
-        if (status != QProcess::NormalExit || code != 0) {
-            finish("Bambu FTPS upload failed: " + QString::fromUtf8(transfer.readAllStandardError()).trimmed());
-            return;
-        }
         uploaded = true;
         emit progress("Bambu upload complete - Checking printer…");
         checkPrinter();
     });
-    // Config goes over stdin so the LAN access code is absent from process arguments.
-    // -q prevents a user's .curlrc from changing authentication or enabling logs.
-#ifdef Q_OS_WIN
-    const auto curl = QDir(qEnvironmentVariable("SystemRoot")).filePath("System32/curl.exe");
-#elif defined(Q_OS_MACOS)
-    const QString curl = "/usr/bin/curl";
-#else
-    const auto curl = QStandardPaths::findExecutable("curl");
-#endif
-    transfer.start(curl, {"-q", "--config", "-"});
-    const auto config = "url = " + curlQuote(ftpUrl.toString(QUrl::FullyEncoded))
-        + "\nuser = " + curlQuote("bblp:" + accessCode)
-        + "\nupload-file = " + curlQuote(archive.fileName())
-        + "\ninsecure\nssl-reqd\ndisable-epsv\nftp-skip-pasv-ip\nnoproxy = \"*\""
-          "\nconnect-timeout = 15\nmax-time = 180\nsilent\nshow-error\n";
-    transfer.write(config.toUtf8());
-    transfer.closeWriteChannel();
+    transfer.start(ftpUrl, accessCode, printUrlPrefix == "ftp:///" ? "/" : "/cache", file.filename, file.data);
 }
 
 void BambuSendJob::startPrint()
@@ -176,9 +152,9 @@ void BambuSendJob::startPrint()
     sequence = QString::number(QRandomGenerator::global()->bounded(1u, 0x7fffffffu));
     startSent = true;
     emit progress("Starting Bambu print…");
-    timeout.start(30000);
+    timeout.start(startTimeout);
     publish({{"print", QJsonObject{{"sequence_id", sequence}, {"command", "project_file"},
-        {"param", file.gcodePath}, {"url", "ftp:///" + file.filename}, {"file", file.filename},
+        {"param", file.gcodePath}, {"url", printUrlPrefix + file.filename}, {"file", file.filename},
         {"md5", QString::fromLatin1(file.gcodeMd5).toUpper()},
         {"project_id", "0"}, {"profile_id", "0"}, {"task_id", "0"}, {"subtask_id", "0"},
         {"subtask_name", file.filename}, {"plate_idx", 0}, {"bed_type", "auto"},
@@ -194,7 +170,7 @@ void BambuSendJob::finish(const QString &error)
     mqtt.disconnect(this);
     mqtt.disconnectFromHost();
     transfer.disconnect(this);
-    if (transfer.state() != QProcess::NotRunning) transfer.kill();
+    transfer.stop();
     if (error.isEmpty()) emit completed();
     else emit failed(error);
 }

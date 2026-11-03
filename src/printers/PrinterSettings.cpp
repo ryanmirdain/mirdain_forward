@@ -6,7 +6,8 @@
 
 #include <stdexcept>
 
-PrinterSettings::PrinterSettings(AppConfig &config, QMenu &printerMenu) : menu(printerMenu), config(config)
+PrinterSettings::PrinterSettings(AppConfig &config, QMenu &trayMenu)
+    : menu(trayMenu), config(config), separator(menu.addSeparator())
 {
     const auto saved = config.section("printers");
     for (auto it = saved.constBegin(); it != saved.constEnd(); ++it) {
@@ -51,16 +52,28 @@ PrinterSender *PrinterSettings::remember(const QJsonObject &request)
 
 void PrinterSettings::setBusy(bool busy)
 {
-    menu.setEnabled(!busy);
+    for (auto *action : printerActions)
+        if (action->menu()) action->setEnabled(!busy);
 }
 
 void PrinterSettings::rebuildMenu()
 {
-    menu.clear();
-    if (printers.empty()) menu.addAction("Printers appear after Send and print")->setEnabled(false);
+    for (auto *action : printerActions) {
+        if (auto *submenu = action->menu()) delete submenu;
+        else delete action;
+    }
+    printerActions.clear();
+    if (printers.empty()) {
+        auto *empty = new QAction("Printers appear after Send and print", &menu);
+        empty->setEnabled(false);
+        menu.insertAction(separator, empty);
+        printerActions.append(empty);
+    }
     for (const auto &[key, retained] : printers) {
         auto *sender = retained.get();
-        auto *submenu = menu.addMenu(sender->name());
+        auto *submenu = new QMenu(sender->name(), &menu);
+        menu.insertMenu(separator, submenu);
+        printerActions.append(submenu->menuAction());
         if (!sender->customPrinterId().isEmpty()) {
             auto *identity = submenu->addAction("ID: " + sender->customPrinterId());
             identity->setEnabled(false);
