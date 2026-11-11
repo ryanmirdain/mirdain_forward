@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Mirdain Forward for macOS @ARCHITECTURE@</title>
+    <item>
+      <title>Mirdain Forward @VERSION@</title>
+      <description>@RELEASE_DESCRIPTION_XML_ESCAPED@</description>
+      <sparkle:minimumSystemVersion>@MINIMUM_MACOS_VERSION@</sparkle:minimumSystemVersion>
+      <enclosure url="@IMMUTABLE_HTTPS_DMG_URL@" length="@BYTE_LENGTH@"
+        type="application/octet-stream" sparkle:os="macos"
+        sparkle:version="@VERSION@" sparkle:shortVersionString="@VERSION@"
+        sparkle:edSignature="@ED25519_SIGNATURE@" />
+    </item>
+  </channel>
+</rss>

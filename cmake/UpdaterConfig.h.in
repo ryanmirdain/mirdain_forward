@@ -1,0 +1,6 @@
+#pragma once
+
+inline constexpr bool ForwardUpdatesConfigured = @forward_updates_configured@;
+inline constexpr char ForwardUpdateFeed[] = "@FORWARD_UPDATE_FEED_URL@";
+inline constexpr char ForwardUpdatePublicKey[] = "@FORWARD_UPDATE_PUBLIC_KEY@";
+inline constexpr wchar_t ForwardAppVersion[] = L"@PROJECT_VERSION@";

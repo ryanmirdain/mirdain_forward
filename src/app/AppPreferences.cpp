@@ -1,5 +1,6 @@
 #include "app/AppPreferences.h"
 #include "app/AppConfig.h"
+#include "platform/AppUpdater.h"
 #include "platform/NotificationSender.h"
 
 #include <QAction>
@@ -56,8 +57,8 @@ protected:
 };
 }
 
-AppPreferences::AppPreferences(AppConfig &config, NotificationSender &notifications, QMenu &menu)
-    : config(config), notifications(notifications)
+AppPreferences::AppPreferences(AppConfig &config, NotificationSender &notifications, AppUpdater &updater, QMenu &menu)
+    : config(config), notifications(notifications), updater(updater)
 {
     menu.addAction("Preferences…", &menu, [this] { showDialog(false); });
 }
@@ -187,6 +188,14 @@ void AppPreferences::showDialog(bool firstLaunch)
     const auto [notify, notifyLayout] = addOption("Plate notifications",
         "Notify me when a plate is received.");
     notify->setChecked(previouslyNotifying);
+    layout->addSpacing(20);
+    addDivider();
+    layout->addSpacing(20);
+    const auto [updates, updatesLayout] = addOption("Automatically check for updates", updater.available()
+        ? "Check for new versions in the background. You choose when to install."
+        : "Updates are unavailable in this build or installation.");
+    updates->setChecked(updater.automaticChecksEnabled());
+    updates->setEnabled(updater.available());
     layout->addSpacing(24);
     addDivider();
     layout->addSpacing(16);
@@ -213,6 +222,7 @@ void AppPreferences::showDialog(bool firstLaunch)
         preferences.insert("launch_at_sign_in", launchEnabled);
         preferences.insert("notifications_enabled", notifyEnabled);
         config.setSection("preferences", preferences);
+        if (accepted) updater.setAutomaticChecksEnabled(updates->isChecked());
         if (accepted && notifyEnabled) notifications.requestPermission();
         if (accepted && launchEnabled && startup.status() == StartupRegistration::Status::RequiresApproval) {
             QMessageBox::information(nullptr, "Mirdain Forward",

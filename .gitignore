@@ -2,3 +2,6 @@
 /build-deps/
 /dist/
 .DS_Store
+/.release-keys/
+__pycache__/
+/.release-venv/

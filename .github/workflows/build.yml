@@ -5,12 +5,23 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ''
+      release:
+        type: boolean
+        default: false
+      release_tag:
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-${{ github.ref }}-${{ inputs.release || false }}
   cancel-in-progress: true
 
 jobs:
@@ -26,19 +37,26 @@ jobs:
             platform: macos
             cpu: arm64
             qt-arch: clang_64
+            update-feed-var: FORWARD_UPDATE_FEED_MACOS_ARM64
+            update-key-var: FORWARD_UPDATE_PUBLIC_KEY_MACOS
           - runner: macos-15-intel
             platform: macos
             cpu: x86_64
             qt-arch: clang_64
+            update-feed-var: FORWARD_UPDATE_FEED_MACOS_X86_64
+            update-key-var: FORWARD_UPDATE_PUBLIC_KEY_MACOS
           - runner: windows-2022
             platform: windows
             cpu: x64
             qt-arch: win64_msvc2022_64
+            update-feed-var: FORWARD_UPDATE_FEED_WINDOWS_X64
+            update-key-var: FORWARD_UPDATE_PUBLIC_KEY_WINDOWS
 
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: Install Qt
         uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
@@ -79,11 +97,20 @@ jobs:
         run: cmake --install build-deps/qtmqtt-build
 
       - name: Configure
+        env:
+          FORWARD_UPDATE_FEED_URL: ${{ vars[matrix.update-feed-var] }}
+          FORWARD_UPDATE_PUBLIC_KEY: ${{ vars[matrix.update-key-var] }}
         shell: bash
-        run: >-
-          cmake -S . -B build
-          -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}"
+        run: |
+          # Without a public key, normal CI produces an updater-disabled build.
+          if [[ -z "$FORWARD_UPDATE_PUBLIC_KEY" ]]; then
+            FORWARD_UPDATE_FEED_URL=""
+          fi
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}" \
+            -DFORWARD_UPDATE_FEED_URL="${FORWARD_UPDATE_FEED_URL}" \
+            -DFORWARD_UPDATE_PUBLIC_KEY="${FORWARD_UPDATE_PUBLIC_KEY}"
 
       - name: Build and deploy dependencies
         run: cmake --build build --config Release --parallel
@@ -103,6 +130,18 @@ jobs:
           Copy-Item build-deps/qtmqtt/LICENSES/GPL-3.0-only.txt build/Release/QtMqtt-LICENSE
           Copy-Item "$env:VCToolsRedistDir/x64/Microsoft.VC143.CRT/*.dll" build/Release/
           Compress-Archive -Path build/Release/* -DestinationPath dist/mirdain_forward-windows-x64.zip
+          & "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe" build/installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Record release build metadata
+        if: inputs.release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          PLATFORM: ${{ matrix.platform }}-${{ matrix.cpu }}
+          FORWARD_UPDATE_PUBLIC_KEY_MACOS: ${{ vars.FORWARD_UPDATE_PUBLIC_KEY_MACOS }}
+          FORWARD_UPDATE_PUBLIC_KEY_WINDOWS: ${{ vars.FORWARD_UPDATE_PUBLIC_KEY_WINDOWS }}
+        run: python tools/release_updates.py build-metadata --tag "$RELEASE_TAG" --platform "$PLATFORM" --output "dist/$PLATFORM.json"
 
       - name: Upload app
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -111,5 +150,7 @@ jobs:
           path: |
             dist/*.dmg
             dist/*.zip
+            dist/*-setup.exe
+            dist/*.json
           if-no-files-found: error
           retention-days: 14

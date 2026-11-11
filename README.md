@@ -9,7 +9,7 @@ ELEGOO, PrusaLink, or Bambu LAN printer, then requests printing. No account or
 queue. Printer names, IDs, and settings are saved locally; printer credentials
 arrive in each request.
 
-The menu lists each printer directly, followed by Preferences, the current transfer status, and Quit. Only one
+The menu lists each printer directly, followed by Check for Updates, Preferences, the current transfer status, and Quit. Only one
 transfer runs at a time. Success means the printer accepted the print request, not that the
 first layer has begun. Busy printers are not interrupted. Start commands are
 never automatically retried; after an unconfirmed start, check the printer
@@ -70,6 +70,55 @@ interfaces. `AppConfig` reads and atomically writes sections of the existing
 The saved startup choice records the user's last selection; the preferences UI
 reads current OS registration instead of automatically applying that choice.
 Older files containing only `printers` remain readable.
+
+## App updates
+
+Forward integrates Sparkle 2.10.1 on macOS and WinSparkle 0.9.4 on Windows.
+CMake downloads the pinned SDKs with SHA-256 verification and bundles the
+framework/DLL. **Check for Updates…** uses the native updater UI. Preferences
+and first-launch setup offer **Automatically check for updates**, initially off.
+Update preferences are stored by each native updater (NSUserDefaults on macOS,
+WinSparkle's registry settings on Windows), so changes in native update dialogs
+are reflected in Preferences. Forward does not duplicate them in `printers.json`.
+The updater starts after setup finishes. Users choose when to install; Forward
+does not enable unattended installation.
+
+Configure both public release values at CMake configure time:
+
+```sh
+cmake -S . -B build \
+  -DFORWARD_UPDATE_FEED_URL="https://downloads.example.com/forward/macos-arm64.xml" \
+  -DFORWARD_UPDATE_PUBLIC_KEY="YOUR_BASE64_ED25519_PUBLIC_KEY"
+```
+
+Use a separate feed for each macOS architecture and for Windows x64. Feed URLs
+must use HTTPS; a public verification key is required. With neither value set,
+development builds still bundle the updater but disable update controls and do
+not contact an update server. Supplying only one value fails configuration.
+Linux builds show unavailable update controls.
+
+macOS delays an updater-requested relaunch until the current transfer completes
+and refuses new transfers while that installation is pending. On Windows, an
+installation attempt during a transfer is declined with a message asking the user
+to finish the transfer and install again. Once shutdown is reserved, new requests
+are rejected before any download or print command. Checks and update downloads
+can run during transfers. This guard concerns sending a plate; it does not wait
+for a printer to finish printing after accepting a print request.
+
+Windows updates require installation using the new per-user Inno Setup installer.
+Portable ZIP copies do not enable updating, since an installer would otherwise
+create a different installation instead of replacing the running copy. The
+installer records its directory in HKCU and preserves the user's app data.
+Its running-app mutex prevents replacement while Forward is running, including
+when the installer is launched manually. Updates reuse the existing installation
+directory and launch Forward afterward. Existing portable users should quit
+Forward, run the installer once, and, if startup was enabled, disable it in the
+old copy and enable it in the installed copy.
+
+Existing releases without an updater require one manual installation of an
+updater-enabled release. Publishing feeds and signed packages is separate from
+building the application. See [release instructions](packaging/updates/README.md)
+for CI variables, feed templates, signing, and publishing order.
 
 ## Notifications
 
@@ -145,7 +194,7 @@ src/
   main.cpp              HTTP forwarding and app lifecycle
   app/                  Shared JSON config and preferences UI
   archive/              ZIP archive reader
-  platform/             Startup and notification interfaces
+  platform/             Startup, notification, and updater interfaces
     macos/              Native macOS implementations
     windows/            Windows startup registration and Qt notifications
     generic/            Fallback notifications and unsupported startup
@@ -225,7 +274,8 @@ builds use the `universal` suffix. The DMG contains the deployed app, an
 `Mirdain Forward.app` to **Applications**, eject the image, and launch the app
 from Applications before enabling automatic startup. Packaging verifies the
 app's signature and preserves its bundled frameworks, plugins, and permissions.
-These builds use ad-hoc signing and are not notarized with Apple.
+These builds use ad-hoc signing and are not notarized with Apple. See
+[update release instructions](packaging/updates/README.md) before publishing updates.
 
 ### Windows
 
@@ -242,7 +292,11 @@ cmake --build build --config Release --parallel
 ```
 
 Each link runs `windeployqt` to copy Qt DLLs, OpenSSL DLLs, plugins, and compiler runtime files
-beside the executable. Distribute the whole `build/Release` folder. The executable
+beside the executable. For a portable copy, distribute the whole `build/Release` folder.
+For an installed copy with updater support, first add the README and licenses
+as in CI, then compile `build/installer.iss` with Inno Setup 6. This template
+expects the multi-configuration `build/Release` output above. The installer
+is written to `dist/mirdain_forward-windows-x64-setup.exe`. The executable
 uses the supplied app icon and runs in the system tray without a console window.
 Printer credentials and the localhost API work the same way as on macOS.
 
@@ -259,7 +313,7 @@ It uses pinned action revisions and Qt 6.9.2, caches the SDK, and builds:
 | --- | --- | --- |
 | `mirdain_forward-macos-arm64` | `macos-15` | Apple Silicon DMG with bundled Qt app and Applications shortcut |
 | `mirdain_forward-macos-x86_64` | `macos-15-intel` | Intel DMG with bundled Qt app and Applications shortcut |
-| `mirdain_forward-windows-x64` | `windows-2022` | `.exe`, Qt DLLs, plugins, and compiler runtime |
+| `mirdain_forward-windows-x64` | `windows-2022` | Per-user setup installer and portable ZIP with Qt DLLs, plugins, and compiler runtime |
 
 Qt MQTT is built from the pinned Qt 6.9.2 source revision and installed into the
 CI SDK because the public SDK catalog does not provide MQTT binaries. It uses
@@ -270,12 +324,15 @@ beside the executable so they can run without a separate runtime installation.
 
 Once the workflow file is pushed, open a completed run's **Artifacts** section
 to download your platform's artifact. Artifacts are kept for 14 days. Unzip the
-macOS artifact to find the DMG; Windows artifacts contain the app ZIP. macOS DMGs
+macOS artifact to find the DMG; Windows artifacts contain both the setup installer and the portable app ZIP. macOS DMGs
 preserve the app bundle's symlinks and permissions. macOS DMGs collect licenses
 in a **Licenses** folder and omit the README. Windows ZIPs include the README
 and licenses. Third-party licenses include libbgcode (AGPL-3.0), Heatshrink, and zlib.
 macOS uses ad-hoc signing; Windows builds are unsigned. This
 workflow builds and packages only; it does not run tests or publish releases.
+The separate **Release Forward** workflow handles version tags, update signing,
+GitHub Releases, and Aperture feed synchronization after one-time configuration.
+See [release setup](packaging/updates/README.md).
 
 ## Request
 

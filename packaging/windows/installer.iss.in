@@ -1,0 +1,34 @@
+[Setup]
+AppId={{AF501088-29DC-47C4-921B-E82FB9BC40D9}
+AppName=Mirdain Forward
+AppVersion=@PROJECT_VERSION@
+AppPublisher=Mirdain Systems
+DefaultDirName={localappdata}\Programs\Mirdain Forward
+DefaultGroupName=Mirdain Forward
+DisableProgramGroupPage=yes
+PrivilegesRequired=lowest
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+MinVersion=10.0.17763
+AppMutex=MirdainForwardRunning
+CloseApplications=no
+RestartApplications=no
+UninstallDisplayIcon={app}\mirdain_forward.exe
+SetupIconFile=@CMAKE_CURRENT_SOURCE_DIR@/assets/Icon.ico
+LicenseFile=@CMAKE_CURRENT_SOURCE_DIR@/LICENSE
+OutputDir=@CMAKE_CURRENT_SOURCE_DIR@/dist
+OutputBaseFilename=mirdain_forward-windows-x64-setup
+Compression=lzma2
+SolidCompression=yes
+
+[Files]
+Source: "@CMAKE_CURRENT_BINARY_DIR@/Release/*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{group}\Mirdain Forward"; Filename: "{app}\mirdain_forward.exe"
+
+[Registry]
+Root: HKCU; Subkey: "Software\Mirdain Systems\Mirdain Forward"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletevalue uninsdeletekeyifempty
+
+[Run]
+Filename: "{app}\mirdain_forward.exe"; Description: "Launch Mirdain Forward"; Flags: nowait postinstall

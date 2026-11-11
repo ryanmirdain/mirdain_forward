@@ -1,6 +1,7 @@
 #include "app/AppConfig.h"
 #include "app/AppPreferences.h"
 #include "platform/NotificationSender.h"
+#include "platform/AppUpdater.h"
 #include "printers/PrinterSender.h"
 #include "printers/PrinterSettings.h"
 #include "archive/ZipArchive.h"
@@ -29,6 +30,10 @@
 #include <QTcpServer>
 #include <QTemporaryFile>
 #include <QTimer>
+
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 
 #include <memory>
 #include <stdexcept>
@@ -138,6 +143,11 @@ public:
                     connect(sender, &PrinterSender::completed, this, [this, job] { finish(job); });
                     connect(sender, &PrinterSender::failed, this, [this, job](const QString &error) { finish(job, error); });
                     job->sliceId = body.value("slice_id").toString();
+                    if (!updater.beginTransfer()) {
+                        job->sender->disconnect(this);
+                        job->responder.sendResponse(response(origin, Status::Conflict, {{"error", "Forward is restarting to install an update."}}));
+                        return;
+                    }
                     active = job;
                     printerSettings.setBusy(true);
                     if (preferences.notificationsEnabled())
@@ -155,7 +165,7 @@ public:
         return listener->listen(QHostAddress::LocalHost, Port) && server.bind(listener);
     }
 
-    void promptOnFirstLaunch() { preferences.promptOnFirstLaunch(); }
+    void promptOnFirstLaunch() { preferences.promptOnFirstLaunch(); updater.start(); }
 
 private:
     QHttpServer server;
@@ -165,7 +175,8 @@ private:
     PrinterSettings printerSettings;
     QSystemTrayIcon tray;
     NotificationSender notifications{tray};
-    AppPreferences preferences{config, notifications, menu};
+    AppUpdater updater{menu};
+    AppPreferences preferences{config, notifications, updater, menu};
     QAction *status;
     std::shared_ptr<Job> active;
 
@@ -180,6 +191,7 @@ private:
                             : QJsonObject{{"error", error}}));
         active.reset();
         printerSettings.setBusy(false);
+        updater.endTransfer();
     }
 
     void download(const std::shared_ptr<Job> &job, const QUrl &url)
@@ -251,8 +263,14 @@ int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
     QApplication::setApplicationName("Mirdain Forward");
+    QApplication::setApplicationVersion(FORWARD_APP_VERSION);
     QApplication::setQuitOnLastWindowClosed(false);
     try {
+#ifdef Q_OS_WIN
+        // Keep this handle until process exit so Inno Setup cannot replace a running app.
+        if (!CreateMutexW(nullptr, FALSE, L"MirdainForwardRunning"))
+            throw std::runtime_error("Cannot create the installer mutex.");
+#endif
         const auto directory = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
         if (!QDir().mkpath(directory))
             throw std::runtime_error(("Cannot create app directory: " + directory).toStdString());

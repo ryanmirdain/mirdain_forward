@@ -1,0 +1,125 @@
+name: Release Forward
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag, such as v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forward-release
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    environment: release
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+      tag: ${{ steps.source.outputs.tag }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve a release from main
+        id: source
+        shell: bash
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected a v1.2.3 tag'; exit 1; }
+          commit=$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")
+          git merge-base --is-ancestor "$commit" origin/main
+          git checkout --detach "$commit"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r tools/release-requirements.txt
+      - name: Require signing and publishing configuration
+        env:
+          FORWARD_UPDATE_PRIVATE_KEY_MACOS: ${{ secrets.FORWARD_UPDATE_PRIVATE_KEY_MACOS }}
+          FORWARD_UPDATE_PRIVATE_KEY_WINDOWS: ${{ secrets.FORWARD_UPDATE_PRIVATE_KEY_WINDOWS }}
+          APERTURE_PUBLISH_TOKEN: ${{ secrets.APERTURE_PUBLISH_TOKEN }}
+          FORWARD_UPDATE_PUBLIC_KEY_MACOS: ${{ vars.FORWARD_UPDATE_PUBLIC_KEY_MACOS }}
+          FORWARD_UPDATE_PUBLIC_KEY_WINDOWS: ${{ vars.FORWARD_UPDATE_PUBLIC_KEY_WINDOWS }}
+          FORWARD_UPDATE_FEED_MACOS_ARM64: ${{ vars.FORWARD_UPDATE_FEED_MACOS_ARM64 }}
+          FORWARD_UPDATE_FEED_MACOS_X86_64: ${{ vars.FORWARD_UPDATE_FEED_MACOS_X86_64 }}
+          FORWARD_UPDATE_FEED_WINDOWS_X64: ${{ vars.FORWARD_UPDATE_FEED_WINDOWS_X64 }}
+        run: python tools/release_updates.py preflight --tag "$RELEASE_TAG"
+      - name: Require public downloads and a new release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          [[ "$(gh repo view "$GITHUB_REPOSITORY" --json isPrivate --jq .isPrivate)" == false ]] || { echo 'Release downloads must be public'; exit 1; }
+          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > release-state.txt 2>/dev/null; then
+            [[ "$(cat release-state.txt)" == true ]] || { echo 'Already published. Run Aperture Sync Forward updates to retry feed publishing.'; exit 1; }
+          fi
+
+  build:
+    needs: prepare
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ needs.prepare.outputs.commit }}
+      release: true
+      release_tag: ${{ needs.prepare.outputs.tag }}
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r tools/release-requirements.txt
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: mirdain_forward-*
+          path: release-assets
+          merge-multiple: true
+      - name: Sign final packages and generate appcasts
+        env:
+          FORWARD_UPDATE_PRIVATE_KEY_MACOS: ${{ secrets.FORWARD_UPDATE_PRIVATE_KEY_MACOS }}
+          FORWARD_UPDATE_PRIVATE_KEY_WINDOWS: ${{ secrets.FORWARD_UPDATE_PRIVATE_KEY_WINDOWS }}
+          FORWARD_UPDATE_PUBLIC_KEY_MACOS: ${{ vars.FORWARD_UPDATE_PUBLIC_KEY_MACOS }}
+          FORWARD_UPDATE_PUBLIC_KEY_WINDOWS: ${{ vars.FORWARD_UPDATE_PUBLIC_KEY_WINDOWS }}
+        run: python tools/release_updates.py sign --tag "$RELEASE_TAG" --assets release-assets --output release-feeds
+      - name: Upload packages before publishing the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > release-state.txt 2>/dev/null; then
+            [[ "$(cat release-state.txt)" == true ]] || { echo 'Refusing to overwrite a published release'; exit 1; }
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --title "Mirdain Forward ${RELEASE_TAG#v}" \
+              --notes-file "packaging/updates/notes/${RELEASE_TAG#v}.md"
+          fi
+          gh release upload "$RELEASE_TAG" --clobber release-assets/*.dmg release-assets/*-setup.exe release-assets/*.zip release-feeds/*
+          gh release edit "$RELEASE_TAG" --draft=false --latest
+      - name: Publish the feeds through Aperture
+        env:
+          GH_TOKEN: ${{ secrets.APERTURE_PUBLISH_TOKEN }}
+        shell: bash
+        run: |
+          python -c 'import json, os; print(json.dumps({"event_type": "forward-release", "client_payload": {"tag": os.environ["RELEASE_TAG"]}}))' > dispatch.json
+          gh api --method POST repos/hbaig2021/aperture/dispatches --input dispatch.json

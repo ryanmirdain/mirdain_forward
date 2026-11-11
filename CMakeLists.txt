@@ -1,4 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
+# Qt 6.9's supported macOS baseline, also advertised in release appcasts.
+if(CMAKE_HOST_APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version" FORCE)
+endif()
 project(mirdain_forward VERSION 0.1.0 LANGUAGES C CXX)
 
 include(FetchContent)
@@ -56,6 +60,8 @@ set_target_properties(mirdain_forward PROPERTIES
     MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
 )
 
+include(cmake/Updates.cmake)
+
 if(APPLE)
     set_target_properties(mirdain_forward PROPERTIES OUTPUT_NAME "Mirdain Forward")
     # TLS and platform plugins must resolve the bundled libraries first.
@@ -105,6 +111,8 @@ if(APPLE)
         VERBATIM
     )
     add_custom_command(TARGET mirdain_forward POST_BUILD
+        COMMAND /usr/bin/ditto "${sparkle_SOURCE_DIR}/Sparkle.framework"
+            "$<TARGET_BUNDLE_DIR:mirdain_forward>/Contents/Frameworks/Sparkle.framework"
         COMMAND "${macdeployqt}" "$<TARGET_BUNDLE_DIR:mirdain_forward>" ${deploy_library_paths} -codesign=-
         # Finder uses the bundle directory's date to invalidate cached icons.
         COMMAND "${CMAKE_COMMAND}" -E touch "$<TARGET_BUNDLE_DIR:mirdain_forward>"
