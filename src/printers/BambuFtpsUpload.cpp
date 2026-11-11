@@ -12,9 +12,9 @@ BambuFtpsUpload::BambuFtpsUpload(QObject *parent) : QObject(parent)
     // session-reuse backend, including on machines without OpenSSL installed.
     OPENSSL_init_ssl(0, nullptr);
     timeout.setSingleShot(true);
-    deadline.setSingleShot(true);
+    progressTimer.setInterval(1000);
     connect(&timeout, &QTimer::timeout, this, [this] { fail("connection or transfer stalled."); });
-    connect(&deadline, &QTimer::timeout, this, [this] { fail("upload exceeded 180 seconds."); });
+    connect(&progressTimer, &QTimer::timeout, this, &BambuFtpsUpload::reportProgress);
     connect(&control, &QSslSocket::readyRead, this, &BambuFtpsUpload::readReplies);
     connect(&control, &QSslSocket::errorOccurred, this, [this] { fail(control.errorString()); });
     connect(&data, &QSslSocket::errorOccurred, this, [this](QAbstractSocket::SocketError error) {
@@ -29,10 +29,16 @@ BambuFtpsUpload::BambuFtpsUpload(QObject *parent) : QObject(parent)
         // after the server's preliminary transfer reply.
         command(Step::Store, "STOR " + filename.toUtf8());
     });
-    connect(&data, &QSslSocket::encrypted, this, &BambuFtpsUpload::writeData);
+    connect(&data, &QSslSocket::encrypted, this, [this] {
+        progressClock.start();
+        progressTimer.start();
+        writeData();
+        if (!dataClosed) reportProgress();
+    });
     connect(&data, &QSslSocket::encryptedBytesWritten, this, [this] {
         timeout.start(15000);
-        writeData();
+        // Refill after Qt has finished handling the underlying socket write.
+        QMetaObject::invokeMethod(this, &BambuFtpsUpload::writeData, Qt::QueuedConnection);
     });
 }
 
@@ -56,7 +62,6 @@ void BambuFtpsUpload::start(const QUrl &endpoint, const QString &code, const QSt
     control.setProxy(QNetworkProxy::NoProxy);
     data.setProxy(QNetworkProxy::NoProxy);
     timeout.start(15000);
-    deadline.start(180000);
     control.connectToHostEncrypted(url.host(), url.port());
 }
 
@@ -64,7 +69,7 @@ void BambuFtpsUpload::stop()
 {
     stopped = true;
     timeout.stop();
-    deadline.stop();
+    progressTimer.stop();
     control.abort();
     data.abort();
 }
@@ -172,24 +177,36 @@ void BambuFtpsUpload::reply(int code, const QByteArray &line)
 void BambuFtpsUpload::writeData()
 {
     if (stopped || dataClosed || step != Step::Complete || !data.isEncrypted()) return;
-    if (offset < archive.size()) {
-        // Bound the queued data so disconnects and stalls remain observable.
-        if (data.bytesToWrite() + data.encryptedBytesToWrite() >= 64 * 1024) return;
-        const auto count = data.write(archive.constData() + offset, qMin<qsizetype>(64 * 1024, archive.size() - offset));
+    // Keep a bounded pipeline full instead of feeding one chunk per callback.
+    // Use the same 8 KiB writes as the printer client's storbinary_bambu.
+    constexpr qint64 queueLimit = 256 * 1024;
+    while (offset < archive.size() && data.bytesToWrite() + data.encryptedBytesToWrite() < queueLimit) {
+        const auto count = data.write(archive.constData() + offset, qMin<qsizetype>(8192, archive.size() - offset));
         if (count < 0) return fail(data.errorString());
+        if (count == 0) return;
         offset += count;
-    }
-    const auto sent = offset - data.bytesToWrite();
-    const int percent = archive.isEmpty() ? 100 : int(sent * 100 / archive.size());
-    if (percent != lastPercent) {
-        lastPercent = percent;
-        emit progress(QString("Uploading Bambu plate over FTPS… %1%").arg(percent));
     }
     if (offset != archive.size() || data.bytesToWrite() || data.encryptedBytesToWrite()) return;
     dataClosed = true;
+    progressTimer.stop();
     emit progress("Waiting for Bambu FTPS upload confirmation…");
     // Port the printer client's storbinary_bambu workaround: P1P hangs on
     // TLS unwrap, while vsFTPd needs close_notify to accept the upload.
     if (vsFtpd) data.disconnectFromHost();
     else data.abort();
+}
+
+void BambuFtpsUpload::reportProgress()
+{
+    // Exclude both Qt's plaintext queue and its encrypted socket queue. TLS
+    // framing makes this an approximation until the final buffers have drained.
+    const auto sent = qMax(lastProgressBytes,
+        qMax<qint64>(0, offset - data.bytesToWrite() - data.encryptedBytesToWrite()));
+    const auto elapsed = progressClock.restart();
+    const double kibPerSecond = elapsed > 0 ? (sent - lastProgressBytes) * 1000.0 / elapsed / 1024 : 0;
+    lastProgressBytes = sent;
+    const int percent = archive.isEmpty() ? 100 : int(sent * 100 / archive.size());
+    emit progress(QString("Uploading Bambu… %1% · %2/%3 MiB · %4 KiB/s")
+        .arg(percent).arg(sent / 1048576.0, 0, 'f', 1)
+        .arg(archive.size() / 1048576.0, 0, 'f', 1).arg(kibPerSecond, 0, 'f', 0));
 }

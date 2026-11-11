@@ -90,16 +90,7 @@ jobs:
 
       - name: Package macOS
         if: runner.os == 'macOS'
-        run: |
-          package="dist/mirdain_forward-macos-${{ matrix.cpu }}"
-          mkdir -p "$package"
-          cp README.md "$package/README.md"
-          cp LICENSE "$package/LICENSE"
-          cp build/_deps/miniz-src/LICENSE "$package/miniz-LICENSE"
-          cp build-deps/qtmqtt/LICENSES/GPL-3.0-only.txt "$package/QtMqtt-LICENSE"
-          ditto build/mirdain_forward.app "$package/mirdain_forward.app"
-          codesign --verify --deep --strict "$package/mirdain_forward.app"
-          ditto -c -k --sequesterRsrc --keepParent "$package" "$package.zip"
+        run: cmake --build build --config Release --target package
 
       - name: Package Windows
         if: runner.os == 'Windows'
@@ -117,6 +108,8 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mirdain_forward-${{ matrix.platform }}-${{ matrix.cpu }}
-          path: dist/*.zip
+          path: |
+            dist/*.dmg
+            dist/*.zip
           if-no-files-found: error
           retention-days: 14

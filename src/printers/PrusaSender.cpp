@@ -1,10 +1,16 @@
 #include "printers/PrusaSender.h"
+#include "printers/PrusaBgcode.h"
 
 #include <QAuthenticator>
+#include <QElapsedTimer>
+#include <QFutureWatcher>
 #include <QHttpMultiPart>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRegularExpression>
+#include <QUuid>
+#include <QVersionNumber>
+#include <QtConcurrentRun>
 
 #include <stdexcept>
 #include <utility>
@@ -42,7 +48,7 @@ QNetworkRequest PrusaSendJob::request(const QString &path) const
     auto url = origin;
     url.setPath(path);
     QNetworkRequest request(url);
-    request.setTransferTimeout(180000);
+    request.setTransferTimeout(15000);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     request.setRawHeader("Accept", "application/json");
     if (!apiKey.isEmpty()) request.setRawHeader("X-Api-Key", apiKey);
@@ -75,15 +81,19 @@ void PrusaSendJob::get(const QString &path, std::function<void(const QJsonObject
 void PrusaSendJob::send(PrinterFile input)
 {
     file = std::move(input);
+    // Buddy firmware has a 168-byte URL buffer; archive member names can exceed it.
+    file.filename = file.filename.chopped(6).left(32) + "-" + QUuid::createUuid().toString(QUuid::Id128) + ".gcode";
     emit progress("Connecting to PrusaLink…");
     get("/api/version", [this](const QJsonObject &version) {
         modern = version.value("capabilities").toObject().value("upload-by-put").toBool();
+        binaryGcode = modern && QVersionNumber::fromString(version.value("firmware").toString()) >= QVersionNumber(5, 1, 0);
         checkPrinter();
     });
 }
 
 void PrusaSendJob::checkPrinter()
 {
+    emit progress("Checking Prusa printer…");
     get(modern ? "/api/v1/status" : "/api/printer", [this](const QJsonObject &status) {
         bool ready;
         if (modern) {
@@ -105,13 +115,14 @@ void PrusaSendJob::checkPrinter()
 
 void PrusaSendJob::chooseStorage()
 {
+    emit progress("Selecting Prusa storage…");
     if (!modern) {
         if (storage.isEmpty()) storage = "local";
         if (storage != "local" && storage != "sdcard") {
             emit failed("This PrusaLink version requires local or sdcard storage.");
             return;
         }
-        upload();
+        prepareUpload();
         return;
     }
     get("/api/v1/storage", [this](const QJsonObject &result) {
@@ -122,7 +133,7 @@ void PrusaSendJob::chooseStorage()
             if (item.value("available").toBool() && !item.value("read_only").toBool()
                 && !name.isEmpty() && (storage.isEmpty() || storage == name)) {
                 storage = name;
-                upload();
+                prepareUpload();
                 return;
             }
         }
@@ -130,9 +141,41 @@ void PrusaSendJob::chooseStorage()
     });
 }
 
+void PrusaSendJob::prepareUpload()
+{
+    if (!binaryGcode) {
+        upload();
+        return;
+    }
+    emit progress("Compressing Prusa G-code to BGCODE…");
+    using CompressionResult = std::pair<QByteArray, QString>;
+    auto *watcher = new QFutureWatcher<CompressionResult>(this);
+    connect(watcher, &QFutureWatcher<CompressionResult>::finished, this, [this, watcher] {
+        watcher->deleteLater();
+        auto result = watcher->result();
+        if (!result.second.isEmpty()) {
+            emit failed("Prusa BGCODE compression failed: " + result.second);
+            return;
+        }
+        file.data = std::move(result.first);
+        file.filename.chop(6); // .gcode -> .bgcode
+        file.filename += ".bgcode";
+        upload();
+    });
+    watcher->setFuture(QtConcurrent::run([gcode = file.data]() -> CompressionResult {
+        try {
+            return {prusaBgcode(gcode), {}};
+        } catch (const std::exception &error) {
+            return {{}, QString::fromUtf8(error.what())};
+        }
+    }));
+}
+
 void PrusaSendJob::upload()
 {
-    emit progress("Uploading to PrusaLink and requesting print…");
+    const auto uploadName = binaryGcode ? QString("Prusa BGCODE") : QString("Prusa");
+    emit progress(QString("Uploading %1… 0% · 0.0/%2 MiB · 0 KiB/s")
+        .arg(uploadName).arg(file.data.size() / 1048576.0, 0, 'f', 1));
     QNetworkReply *reply;
     if (modern) {
         auto upload = request("/api/v1/files/" + storage + "/" + file.filename);
@@ -157,6 +200,24 @@ void PrusaSendJob::upload()
         reply = network.post(request("/api/files/" + storage), form);
         form->setParent(reply);
     }
+    QElapsedTimer progressClock;
+    progressClock.start();
+    connect(reply, &QNetworkReply::uploadProgress, this,
+        [this, uploadName, progressClock, lastProgressBytes = qint64(0)](qint64 sent, qint64 total) mutable {
+            if (total <= 0) return;
+            if (sent == total) {
+                emit progress("Prusa upload complete - Waiting for print response…");
+                return;
+            }
+            const auto elapsed = progressClock.elapsed();
+            if (elapsed < 1000) return;
+            const double kibPerSecond = qMax<qint64>(0, sent - lastProgressBytes) * 1000.0 / elapsed / 1024;
+            lastProgressBytes = sent;
+            progressClock.restart();
+            emit progress(QString("Uploading %1… %2% · %3/%4 MiB · %5 KiB/s")
+                .arg(uploadName).arg(int(sent * 100 / total)).arg(sent / 1048576.0, 0, 'f', 1)
+                .arg(total / 1048576.0, 0, 'f', 1).arg(kibPerSecond, 0, 'f', 0));
+        });
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
         if (accepted(reply)) emit completed();
     });

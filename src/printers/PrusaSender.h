@@ -29,11 +29,13 @@ private:
     QString storage;
     PrinterFile file;
     bool modern = false;
+    bool binaryGcode = false;
 
     QNetworkRequest request(const QString &path) const;
     bool accepted(QNetworkReply *reply);
     void get(const QString &path, std::function<void(const QJsonObject &)> next);
     void checkPrinter();
     void chooseStorage();
+    void prepareUpload();
     void upload();
 };

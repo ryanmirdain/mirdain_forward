@@ -238,7 +238,7 @@ private:
                 if (!native) job->filename.chop(4); // .gcode.3mf -> .gcode
                 job->filename.replace(QRegularExpression("[^A-Za-z0-9._-]"), "_");
                 const auto md5 = QCryptographicHash::hash(gcode, QCryptographicHash::Md5).toHex();
-                job->sender->send({native ? std::move(package) : std::move(gcode), job->filename,
+                job->sender->send({native ? nativePlate.withoutDirectory("Objects") : std::move(gcode), job->filename,
                     slice.value("bed_type").toString(), native ? gcodePath : QString{}, md5}, job->connection);
             } catch (const std::exception &error) {
                 finish(job, QString::fromUtf8(error.what()));

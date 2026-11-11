@@ -12,6 +12,7 @@ public:
     ~ZipArchive();
     QByteArray read(const QString &member);
     QStringList members();
+    QByteArray withoutDirectory(const QString &directory);
 
 private:
     Q_DISABLE_COPY_MOVE(ZipArchive)

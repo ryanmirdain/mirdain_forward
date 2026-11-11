@@ -78,23 +78,21 @@ void PrinterSettings::rebuildMenu()
             auto *identity = submenu->addAction("ID: " + sender->customPrinterId());
             identity->setEnabled(false);
         }
-        auto *level = submenu->addAction("Auto-level bed");
-        level->setCheckable(true);
-        level->setChecked(sender->autoLevelBedEnabled());
-        if (!sender->supportsAutoLevelBed()) {
-            level->setEnabled(false);
-            submenu->addAction("Sender does not support this setting")->setEnabled(false);
+        if (sender->supportsAutoLevelBed()) {
+            auto *level = submenu->addAction("Auto-level bed");
+            level->setCheckable(true);
+            level->setChecked(sender->autoLevelBedEnabled());
+            QObject::connect(level, &QAction::triggered, submenu, [this, sender, level](bool enabled) {
+                const bool previous = sender->autoLevelBedEnabled();
+                sender->setAutoLevelBedEnabled(enabled);
+                try {
+                    config.setSection("printers", toJson());
+                } catch (const std::exception &error) {
+                    sender->setAutoLevelBedEnabled(previous);
+                    level->setChecked(previous);
+                    QMessageBox::critical(&menu, "Mirdain Forward", QString::fromUtf8(error.what()));
+                }
+            });
         }
-        QObject::connect(level, &QAction::triggered, submenu, [this, sender, level](bool enabled) {
-            const bool previous = sender->autoLevelBedEnabled();
-            sender->setAutoLevelBedEnabled(enabled);
-            try {
-                config.setSection("printers", toJson());
-            } catch (const std::exception &error) {
-                sender->setAutoLevelBedEnabled(previous);
-                level->setChecked(previous);
-                QMessageBox::critical(&menu, "Mirdain Forward", QString::fromUtf8(error.what()));
-            }
-        });
     }
 }

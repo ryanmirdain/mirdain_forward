@@ -16,6 +16,10 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 
+#ifdef Q_OS_MACOS
+#include "platform/macos/WindowStyle.h"
+#endif
+
 #include <exception>
 #include <utility>
 
@@ -194,6 +198,9 @@ void AppPreferences::showDialog(bool firstLaunch)
     layout->addWidget(buttons);
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+#ifdef Q_OS_MACOS
+    applyDarkTitleBar(dialog);
+#endif
     const bool accepted = dialog.exec() == QDialog::Accepted;
     if (!accepted && !firstLaunch) return;
 

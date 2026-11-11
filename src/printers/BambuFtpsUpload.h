@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QSslSocket>
 #include <QTimer>
 #include <QUrl>
@@ -24,7 +25,8 @@ private:
     QSslSocket control;
     QSslSocket data;
     QTimer timeout;
-    QTimer deadline;
+    QTimer progressTimer;
+    QElapsedTimer progressClock;
     QUrl url;
     QString accessCode;
     QString directory;
@@ -33,7 +35,7 @@ private:
     QByteArray multilineCode;
     Step step = Step::Welcome;
     qsizetype offset = 0;
-    int lastPercent = -1;
+    qint64 lastProgressBytes = 0;
     bool vsFtpd = false;
     bool dataClosed = false;
     bool stopped = true;
@@ -42,5 +44,6 @@ private:
     void readReplies();
     void reply(int code, const QByteArray &line);
     void writeData();
+    void reportProgress();
     void fail(const QString &message);
 };

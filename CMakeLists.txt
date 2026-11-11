@@ -16,8 +16,9 @@ FetchContent_Declare(miniz
     TIMEOUT 60
 )
 FetchContent_MakeAvailable(miniz)
+include(cmake/Bgcode.cmake)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Network HttpServer WebSockets Mqtt)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Network HttpServer WebSockets Mqtt Concurrent)
 find_package(OpenSSL 3 REQUIRED)
 qt_standard_project_setup()
 
@@ -33,6 +34,7 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/printers/PrinterSender.h src/printers/PrinterSender.cpp
     src/printers/ElegooSender.h src/printers/ElegooSender.cpp
     src/printers/PrusaSender.h src/printers/PrusaSender.cpp
+    src/printers/PrusaBgcode.h src/printers/PrusaBgcode.cpp
     src/printers/BambuSender.h src/printers/BambuSender.cpp
     src/printers/BambuFtpsUpload.h src/printers/BambuFtpsUpload.cpp
 )
@@ -43,7 +45,7 @@ qt_add_resources(mirdain_forward assets PREFIX "/" FILES
 )
 target_include_directories(mirdain_forward PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(mirdain_forward PRIVATE cxx_std_17)
-target_link_libraries(mirdain_forward PRIVATE Qt6::Widgets Qt6::Network Qt6::HttpServer Qt6::WebSockets Qt6::Mqtt miniz OpenSSL::SSL)
+target_link_libraries(mirdain_forward PRIVATE Qt6::Widgets Qt6::Network Qt6::HttpServer Qt6::WebSockets Qt6::Mqtt Qt6::Concurrent miniz mirdain_bgcode OpenSSL::SSL)
 set_target_properties(mirdain_forward PROPERTIES
     WIN32_EXECUTABLE TRUE
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/Info.plist.in"
@@ -55,25 +57,31 @@ set_target_properties(mirdain_forward PROPERTIES
 )
 
 if(APPLE)
+    set_target_properties(mirdain_forward PROPERTIES OUTPUT_NAME "Mirdain Forward")
     # TLS and platform plugins must resolve the bundled libraries first.
     set_property(TARGET mirdain_forward APPEND PROPERTY BUILD_RPATH "@executable_path/../Frameworks")
     enable_language(OBJCXX)
     target_sources(mirdain_forward PRIVATE
         src/platform/macos/NotificationSender.mm
         src/platform/macos/StartupRegistration.mm
+        src/platform/macos/WindowStyle.h src/platform/macos/WindowStyle.mm
     )
     set_source_files_properties(
         src/platform/macos/NotificationSender.mm
         src/platform/macos/StartupRegistration.mm
+        src/platform/macos/WindowStyle.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
     )
     find_library(user_notifications UserNotifications REQUIRED)
     find_library(service_management ServiceManagement REQUIRED)
-    target_link_libraries(mirdain_forward PRIVATE "${user_notifications}" "${service_management}")
+    find_library(appkit AppKit REQUIRED)
+    target_link_libraries(mirdain_forward PRIVATE "${user_notifications}" "${service_management}" "${appkit}")
     target_sources(mirdain_forward PRIVATE assets/Icon.icns)
     set_source_files_properties(assets/Icon.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     target_sources(mirdain_forward PRIVATE packaging/OpenSSL-LICENSE.txt)
     set_source_files_properties(packaging/OpenSSL-LICENSE.txt PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    target_sources(mirdain_forward PRIVATE ${bgcode_licenses})
+    set_source_files_properties(${bgcode_licenses} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     set_property(TARGET mirdain_forward APPEND PROPERTY LINK_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/Icon.icns"
         "${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/Info.plist.in"
@@ -126,9 +134,14 @@ if(WIN32)
     add_custom_command(TARGET mirdain_forward POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/packaging/OpenSSL-LICENSE.txt" "$<TARGET_FILE_DIR:mirdain_forward>/OpenSSL-LICENSE.txt"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${bgcode_licenses} "$<TARGET_FILE_DIR:mirdain_forward>"
         COMMAND "${windeployqt}" "$<IF:$<CONFIG:Debug>,--debug,--release>"
             --compiler-runtime --no-translations --openssl-root "${openssl_root}" "$<TARGET_FILE:mirdain_forward>"
         COMMENT "Bundling Qt DLLs and plugins"
         VERBATIM
     )
+endif()
+
+if(APPLE)
+    include(cmake/MacPackaging.cmake)
 endif()

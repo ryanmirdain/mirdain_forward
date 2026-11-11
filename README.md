@@ -97,7 +97,8 @@ other platforms use `QSystemTrayIcon::showMessage()`.
 Printers are remembered when a valid **Send and print** request arrives. Open
 **printer name > Auto-level bed** in the menu bar / system tray to
 change its setting. It defaults to enabled and applies to subsequent requests.
-The printer submenus are disabled during a transfer.
+Settings unsupported by a printer's sender are hidden. The printer submenus are
+disabled during a transfer.
 
 The custom printer ID is the storage key, so renaming a printer or changing its
 connection preserves its settings. Requests without a custom printer ID use the
@@ -190,10 +191,11 @@ download, plate selection, and settings menu remain shared.
 
 ## Build and run
 
-Requires Qt 6.8+ with Widgets, Network, HTTP Server, WebSockets, and MQTT, CMake,
+Requires Qt 6.8+ with Widgets, Network, HTTP Server, WebSockets, MQTT, and Concurrent, CMake,
 a C/C++17 compiler, and OpenSSL 3 development libraries. CMake downloads and statically
-links a pinned miniz 3.1.2 source archive on first configure; no external unzip
-tool is needed. Dependency examples, fuzzers, and tests are disabled.
+links pinned miniz 3.1.2, Prusa libbgcode, Heatshrink 0.4.1, and zlib 1.3.1 sources
+on first configure; no external unzip or G-code conversion tool is needed.
+Dependency examples, fuzzers, and tests are disabled.
 Bambu uploads use Qt's OpenSSL TLS backend directly, with TLS session reuse
 between the control and data connections. macOS and Windows builds bundle the
 OpenSSL runtime. Credentials stay in memory rather than process arguments.
@@ -203,7 +205,10 @@ OpenSSL runtime. Credentials stay in memory rather than process arguments.
 ```sh
 cmake -S . -B build -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
 cmake --build build --parallel
-open build/mirdain_forward.app
+open "build/Mirdain Forward.app"
+
+# Build a distributable disk image (also builds the app if needed).
+cmake --build build --target package
 ```
 
 On macOS, every link automatically bundles Qt's frameworks and plugins and
@@ -211,6 +216,16 @@ ad-hoc signs the app. No separate `macdeployqt` command is needed. Stale deploye
 files are removed before linking, so rebuilding cannot mix bundled and Homebrew
 Qt libraries. `LSUIElement` keeps the app in the menu bar without a Dock icon.
 Allow local network access if macOS requests it.
+
+Packaging uses CPack's DragNDrop generator to create
+`dist/mirdain_forward-macos-arm64.dmg` on Apple Silicon or
+`dist/mirdain_forward-macos-x86_64.dmg` on Intel. Explicit multi-architecture
+builds use the `universal` suffix. The DMG contains the deployed app, an
+**Applications** shortcut, and a **Licenses** folder. Open it, drag
+`Mirdain Forward.app` to **Applications**, eject the image, and launch the app
+from Applications before enabling automatic startup. Packaging verifies the
+app's signature and preserves its bundled frameworks, plugins, and permissions.
+These builds use ad-hoc signing and are not notarized with Apple.
 
 ### Windows
 
@@ -242,8 +257,8 @@ It uses pinned action revisions and Qt 6.9.2, caches the SDK, and builds:
 
 | Artifact | Runner | Contents |
 | --- | --- | --- |
-| `mirdain_forward-macos-arm64` | `macos-15` | Apple Silicon `.app` with bundled Qt |
-| `mirdain_forward-macos-x86_64` | `macos-15-intel` | Intel `.app` with bundled Qt |
+| `mirdain_forward-macos-arm64` | `macos-15` | Apple Silicon DMG with bundled Qt app and Applications shortcut |
+| `mirdain_forward-macos-x86_64` | `macos-15-intel` | Intel DMG with bundled Qt app and Applications shortcut |
 | `mirdain_forward-windows-x64` | `windows-2022` | `.exe`, Qt DLLs, plugins, and compiler runtime |
 
 Qt MQTT is built from the pinned Qt 6.9.2 source revision and installed into the
@@ -254,9 +269,12 @@ disabled. Windows ZIPs also include the MSVC runtime DLLs
 beside the executable so they can run without a separate runtime installation.
 
 Once the workflow file is pushed, open a completed run's **Artifacts** section
-to download the ZIP for your platform. Artifacts are kept for 14 days. macOS ZIPs
-preserve the app bundle's symlinks and permissions. The builds include the README
-and miniz/Qt MQTT licenses. macOS uses ad-hoc signing; Windows builds are unsigned. This
+to download your platform's artifact. Artifacts are kept for 14 days. Unzip the
+macOS artifact to find the DMG; Windows artifacts contain the app ZIP. macOS DMGs
+preserve the app bundle's symlinks and permissions. macOS DMGs collect licenses
+in a **Licenses** folder and omit the README. Windows ZIPs include the README
+and licenses. Third-party licenses include libbgcode (AGPL-3.0), Heatshrink, and zlib.
+macOS uses ad-hoc signing; Windows builds are unsigned. This
 workflow builds and packages only; it does not run tests or publish releases.
 
 ## Request
@@ -325,9 +343,22 @@ precedence when both authentication methods are configured. `storage` optionally
 selects `usb`, `local`, or `sdcard`. The app checks printer readiness first.
 Modern PrusaLink uses the first available writable storage unless configured,
 then PUTs the G-code with `Print-After-Upload: ?1` and `Overwrite: ?0`.
+Upload filenames use at most 32 characters from the original stem plus a fresh
+UUID and the file extension, keeping the URL within the firmware's 168-byte limit.
+When `/api/version` reports printer firmware 5.1.0 or newer and PUT support,
+Forward first converts the extracted G-code to `.bgcode` with
+[Prusa's libbgcode](https://github.com/prusa3d/libbgcode). Conversion runs in the
+background using MeatPack with comments, Heatshrink 12/4 compression, and CRC32
+checksums. Commands and comments are retained, and thumbnails and print/printer
+metadata are included in the binary blocks. The menu shows compression followed
+by upload progress for the compressed size. The saved `.mirdain` archive is unchanged.
+Older printers and firmware that does not report its version receive plain G-code.
 Legacy PrusaLink uses multipart upload with `select=true` and `print=true`,
 defaulting to `local` storage. Success requires a successful HTTP response to
-upload-and-print. Leveling follows the sliced G-code's start sequence.
+upload-and-print. Upload progress shows percentage, transferred/total MiB, and
+approximate KiB/s at most once per second, then indicates that the app is waiting
+for the upload-and-print response. Legacy multipart totals include the form data.
+Leveling follows the sliced G-code's start sequence.
 
 These are native requests, so the printer does not need browser CORS support.
 See the [PrusaLink API specification](https://github.com/prusa3d/Prusa-Link-Web/blob/master/spec/openapi.yaml).
@@ -358,11 +389,18 @@ storage root and `ftp:///` print URLs; other models use `/cache` and
 `file:///sdcard/cache/` URLs, matching `mirdain_printer_client`. Missing model
 metadata defaults to `/cache`.
 
+Before sending any `.gcode.3mf`, Forward rebuilds the ZIP without directories
+named `Objects` (including `3D/Objects/`). All retained entries are copied in
+compressed form, preserving their contents and compression without recompressing
+the G-code. This also reduces uploads from older saved projects.
+
 FTPS reuses the control TLS session for the passive data connection. As in the
 printer client, servers advertising `vsFTPd` receive TLS `close_notify`; other
 servers, including P1P, get a direct data-socket close to avoid hanging on TLS
-shutdown. Uploads show percentage progress, fail after 15 seconds without data
-progress or a command reply, and have a 180-second overall limit. Success still
+shutdown. Uploads keep a bounded 256 KiB queue fed with 8 KiB writes and show
+percentage, transferred/total MiB, and approximate KiB/s once per second.
+Uploads fail after 15 seconds without data progress or a command reply;
+there is no overall time limit while the upload continues making progress. Success still
 requires the server's final FTP completion reply. P1P/P1S allow 180 seconds for
 the subsequent print acknowledgment; other models allow 30 seconds.
 Success requires the matching MQTT command acknowledgment, not just successful

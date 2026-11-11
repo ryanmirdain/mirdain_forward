@@ -1,5 +1,8 @@
 #include "archive/ZipArchive.h"
 
+#include <QBuffer>
+#include <QScopeGuard>
+
 #include <limits>
 #include <stdexcept>
 
@@ -47,4 +50,33 @@ QStringList ZipArchive::members()
         names.append(QString::fromUtf8(name.constData()));
     }
     return names;
+}
+
+QByteArray ZipArchive::withoutDirectory(const QString &directory)
+{
+    QByteArray bytes;
+    QBuffer output(&bytes);
+    output.open(QIODevice::WriteOnly);
+    mz_zip_archive target{};
+    target.m_pIO_opaque = &output;
+    target.m_pWrite = [](void *opaque, mz_uint64 offset, const void *buffer, size_t size) -> size_t {
+        auto &device = *static_cast<QIODevice *>(opaque);
+        if (!device.seek(qint64(offset))) return 0;
+        const auto count = device.write(static_cast<const char *>(buffer), qint64(size));
+        return count < 0 ? 0 : size_t(count);
+    };
+    if (!mz_zip_writer_init(&target, 0))
+        throw std::runtime_error("Cannot create the printer plate archive.");
+    const auto cleanup = qScopeGuard([&] { mz_zip_writer_end(&target); });
+    const auto names = members();
+    for (qsizetype index = 0; index < names.size(); ++index) {
+        const auto parts = QString(names[index]).replace('\\', '/').split('/', Qt::SkipEmptyParts);
+        if (parts.contains(directory)) continue;
+        // Clone compressed entries so G-code, checksums and metadata stay intact.
+        if (!mz_zip_writer_add_from_zip_reader(&target, &zip, mz_uint(index)))
+            throw std::runtime_error("Cannot copy a printer plate archive member.");
+    }
+    if (!mz_zip_writer_finalize_archive(&target))
+        throw std::runtime_error("Cannot finalize the printer plate archive.");
+    return bytes;
 }
