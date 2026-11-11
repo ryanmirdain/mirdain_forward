@@ -61,6 +61,7 @@ elseif(WIN32)
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:WinSparkle>" "$<TARGET_FILE_DIR:mirdain_forward>"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${winsparkle_root}/COPYING" "$<TARGET_FILE_DIR:mirdain_forward>/WinSparkle-LICENSE"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${winsparkle_root}/COPYING.expat" "$<TARGET_FILE_DIR:mirdain_forward>/WinSparkle-expat-LICENSE"
         VERBATIM
     )
