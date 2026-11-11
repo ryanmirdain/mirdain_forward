@@ -1,23 +1,17 @@
-"""Prepare Forward's Ed25519 keys, release signatures, and appcasts."""
+"""Prepare Forward's Ed25519 keys and signed release metadata."""
 
 import argparse
 import base64
-from datetime import datetime, timezone
-from email.utils import format_datetime
 import hashlib
-import html
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
-import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "ryanmirdain/mirdain_forward"
 FEED_BASE = "https://mirdainsystems.com/forward/updates"
-SPARKLE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
-ET.register_namespace("sparkle", SPARKLE)
 PLATFORMS = {
     "macos-arm64": ("MACOS", "macos", "12.0", "mirdain_forward-macos-arm64.dmg"),
     "macos-x86_64": ("MACOS", "macos", "12.0", "mirdain_forward-macos-x86_64.dmg"),
@@ -31,8 +25,6 @@ def version_for_tag(tag):
     version = re.search(r"project\(mirdain_forward VERSION ([\d.]+)", (ROOT / "CMakeLists.txt").read_text())[1]
     if tag != f"v{version}":
         raise ValueError("The release tag must match CMakeLists.txt's project version")
-    if not (ROOT / "packaging/updates/notes" / f"{version}.md").read_text().strip():
-        raise ValueError("Release notes must not be empty")
     return version
 
 
@@ -101,8 +93,6 @@ def preflight(args):
         name = f"FORWARD_UPDATE_FEED_{platform.upper().replace('-', '_')}"
         if os.environ.get(name) != f"{FEED_BASE}/{platform}.xml":
             raise ValueError(f"Set {name} to {FEED_BASE}/{platform}.xml")
-    if not os.environ.get("APERTURE_PUBLISH_TOKEN"):
-        raise ValueError("Missing release secret: APERTURE_PUBLISH_TOKEN")
     print(f"Release configuration ready for {version}")
 
 
@@ -121,9 +111,9 @@ def build_metadata(args):
 
 def sign(args):
     version = version_for_tag(args.tag)
-    notes = (ROOT / "packaging/updates/notes" / f"{version}.md").read_text().strip()
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     args.output.mkdir(parents=True, exist_ok=True)
+    packages = []
     for platform, (key_platform, os_name, minimum, filename) in PLATFORMS.items():
         metadata = json.loads((args.assets / f"{platform}.json").read_text())
         expected = {"version": version, "platform": platform, "public_key": os.environ[f"FORWARD_UPDATE_PUBLIC_KEY_{key_platform}"].strip(),
@@ -134,33 +124,25 @@ def sign(args):
         package = (args.assets / filename).read_bytes()
         signature = key.sign(package)
         key.public_key().verify(signature, package)
-        rss = ET.Element("rss", {"version": "2.0"})
-        channel = ET.SubElement(rss, "channel")
-        ET.SubElement(channel, "title").text = f"Mirdain Forward - {platform}"
-        item = ET.SubElement(channel, "item")
-        ET.SubElement(item, "title").text = f"Mirdain Forward {version}"
-        ET.SubElement(item, "pubDate").text = format_datetime(datetime.now(timezone.utc), usegmt=True)
-        ET.SubElement(item, "link").text = f"https://github.com/{REPOSITORY}/releases/tag/{args.tag}"
-        ET.SubElement(item, "description").text = "".join(f"<p>{html.escape(paragraph)}</p>" for paragraph in notes.split("\n\n"))
-        ET.SubElement(item, f"{{{SPARKLE}}}minimumSystemVersion").text = minimum
-        attributes = {"url": f"https://github.com/{REPOSITORY}/releases/download/{args.tag}/{filename}",
-                      "length": str(len(package)), "type": "application/octet-stream",
-                      f"{{{SPARKLE}}}os": os_name, f"{{{SPARKLE}}}version": version,
-                      f"{{{SPARKLE}}}shortVersionString": version,
-                      f"{{{SPARKLE}}}edSignature": base64.b64encode(signature).decode()}
-        if key_platform == "WINDOWS":
-            attributes[f"{{{SPARKLE}}}installerArguments"] = "/SILENT /SP- /NOICONS"
-        ET.SubElement(item, "enclosure", attributes)
-        ET.indent(rss, space="  ")
-        ET.ElementTree(rss).write(args.output / f"{platform}.xml", encoding="utf-8", xml_declaration=True)
-    # Checksums include the portable ZIP for people downloading it manually.
-    packages = sorted(path for path in args.assets.iterdir() if path.suffix in (".dmg", ".exe", ".zip"))
-    (args.output / "SHA256SUMS").write_text("".join(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n" for path in packages))
-    print(f"Signed release packages and generated three feeds for {version}")
+        packages.append({
+            "platform": platform, "os": os_name, "filename": filename,
+            "url": f"https://github.com/{REPOSITORY}/releases/download/{args.tag}/{filename}",
+            "length": len(package), "sha256": hashlib.sha256(package).hexdigest(),
+            "edSignature": base64.b64encode(signature).decode(),
+            "minimumSystemVersion": minimum,
+        })
+    (args.output / "signatures.json").write_text(json.dumps({
+        "version": version, "tag": args.tag, "commit": commit, "packages": packages,
+    }, indent=2) + "\n")
+    (args.output / "SHA256SUMS").write_text("".join(f"{package['sha256']}  {package['filename']}\n" for package in packages))
+    print(f"Signed three release installers for {version}; signatures and sizes are in signatures.json")
 
 
 def main():
+    global ROOT
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", type=Path, default=ROOT,
+                        help="Tagged source checkout (when release tooling is from a newer workflow commit)")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("init-keys", "configure-github"):
         command = commands.add_parser(name)
@@ -181,6 +163,7 @@ def main():
     command.add_argument("--output", type=Path, required=True)
     command.set_defaults(run=sign)
     args = parser.parse_args()
+    ROOT = args.source.resolve()
     args.run(args)
 
 

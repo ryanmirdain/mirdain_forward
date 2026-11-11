@@ -331,7 +331,8 @@ and licenses. Third-party licenses include libbgcode (AGPL-3.0), Heatshrink, and
 macOS uses ad-hoc signing; Windows builds are unsigned. This
 workflow builds and packages only; it does not run tests or publish releases.
 The separate **Release Forward** workflow handles version tags, update signing,
-GitHub Releases, and Aperture feed synchronization after one-time configuration.
+and permanent GitHub Release downloads after one-time configuration. Website XML
+feeds are maintained separately using the published `signatures.json`.
 See [release setup](packaging/updates/README.md).
 
 ## Request

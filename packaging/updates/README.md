@@ -1,137 +1,120 @@
-# Forward releases and update feeds
+# Signed Forward installer releases
 
-The release pipeline builds macOS arm64, macOS Intel, and Windows x64 packages,
-signs each update payload with Ed25519, publishes immutable GitHub Release
-assets, and asks Aperture to publish the XML feeds. Aperture's download buttons
-read the same feeds as Forward's native updaters.
+Push a version tag such as `v1.1.0` after pushing the matching source commit to
+main. **Release Forward** builds macOS arm64, macOS Intel, and Windows x64
+installers, signs each finished package with Ed25519, and publishes it to a
+public GitHub Release. There is no automatic XML generation, website commit,
+or Aperture workflow dispatch.
 
-Apple Developer ID signing/notarization and Windows Authenticode signing are
-still deferred. The current packages use ad-hoc macOS signatures and unsigned
-Windows executables. Ed25519 update signatures are automated here; they do not
-establish publisher trust with macOS Gatekeeper or Windows SmartScreen. Add
-platform signing before generating the final packages/signatures when that
-account/certificate setup is ready. Do not label these builds notarized or
-publisher-signed.
+## One-time signing configuration
 
-## One-time setup, when ready
+Keep these secrets in Forward's GitHub Actions environment named `release`:
 
-First commit/push the Forward changes and Aperture changes to their existing
-`main` branches, and deploy Aperture. Its three empty XML feeds are valid and
-show no downloads until the first release. Its `Sync Forward updates` workflow
-must exist on the default branch before it can receive dispatch events.
+- `FORWARD_UPDATE_PRIVATE_KEY_MACOS`
+- `FORWARD_UPDATE_PRIVATE_KEY_WINDOWS`
 
-In `ryanmirdain/mirdain_forward`, create a GitHub Actions environment named
-`release`. Limit release access to trusted tags/manual releases as appropriate
-for your repository. Normal builds and pull requests never receive private
-signing keys.
+Keep these public repository variables:
 
-From the Forward repository, prepare the local release tools:
+- `FORWARD_UPDATE_PUBLIC_KEY_MACOS`
+- `FORWARD_UPDATE_PUBLIC_KEY_WINDOWS`
+- `FORWARD_UPDATE_FEED_MACOS_ARM64`: `https://mirdainsystems.com/forward/updates/macos-arm64.xml`
+- `FORWARD_UPDATE_FEED_MACOS_X86_64`: `https://mirdainsystems.com/forward/updates/macos-x86_64.xml`
+- `FORWARD_UPDATE_FEED_WINDOWS_X64`: `https://mirdainsystems.com/forward/updates/windows-x64.xml`
+
+Feed URLs are embedded into the desktop apps so they can check the XML that
+we maintain on the website. They do not give the release job access to Aperture.
+`APERTURE_PUBLISH_TOKEN` is no longer used or required.
+
+Existing configured keys need no changes. For a new installation of the release
+system, create the `release` environment, authenticate GitHub CLI, then run:
 
 ```sh
 python3 -m venv .release-venv
 .release-venv/bin/python -m pip install -r tools/release-requirements.txt
 .release-venv/bin/python tools/release_updates.py init-keys
-```
-
-On Windows use `.release-venv/Scripts/python.exe` instead. The command creates
-separate macOS and Windows Ed25519 key pairs in ignored `.release-keys/`.
-Private files contain base64-encoded raw 32-byte seeds, are created with mode
-0600 on Unix, and are never printed. Securely back up the directory. Do not
-regenerate it for each release: installed clients trust the existing public key.
-The command refuses to replace existing key files.
-
-After authenticating GitHub CLI with repository administration access, run:
-
-```sh
 .release-venv/bin/python tools/release_updates.py configure-github
 ```
 
-This command uploads the private values through stdin to **environment secrets**
-in `release`, then configures the public repository variables. It can be rerun
-with the same saved keys. It does not generate or rotate keys.
+On Windows use `.release-venv/Scripts/python.exe`. The operator-only `init-keys`
+command creates separate key pairs under ignored `.release-keys/`; it refuses
+to overwrite existing files. Securely back up that directory. Private seeds
+are base64-encoded raw 32-byte values and are created with mode 0600 on Unix.
+`configure-github` uploads private values through stdin to environment secrets
+and configures the public keys and feed URLs. It does not rotate keys.
 
-| Kind | Name | Value |
-| --- | --- | --- |
-| Environment secret | `FORWARD_UPDATE_PRIVATE_KEY_MACOS` | Saved macOS seed, base64 encoded |
-| Environment secret | `FORWARD_UPDATE_PRIVATE_KEY_WINDOWS` | Saved Windows seed, base64 encoded |
-| Repository variable | `FORWARD_UPDATE_PUBLIC_KEY_MACOS` | macOS public verification key |
-| Repository variable | `FORWARD_UPDATE_PUBLIC_KEY_WINDOWS` | Windows public verification key |
-| Repository variable | `FORWARD_UPDATE_FEED_MACOS_ARM64` | `https://mirdainsystems.com/forward/updates/macos-arm64.xml` |
-| Repository variable | `FORWARD_UPDATE_FEED_MACOS_X86_64` | `https://mirdainsystems.com/forward/updates/macos-x86_64.xml` |
-| Repository variable | `FORWARD_UPDATE_FEED_WINDOWS_X64` | `https://mirdainsystems.com/forward/updates/windows-x64.xml` |
-
-Also add `APERTURE_PUBLISH_TOKEN` to Forward's `release` environment. It must
-be able to send `repository_dispatch` events to `hbaig2021/aperture`; that API
-requires Contents write permission on the target repository. Use an appropriately
-scoped PAT or GitHub App token, account for expiration, and never put it in the
-website or release artifacts. The regular `GITHUB_TOKEN` is limited to its own
-repository and cannot dispatch to Aperture. This credential only needs to target
-Aperture, not Forward.
-
-The Aperture workflow uses its own job token to commit only the three XML files
-to `main`. Allow GitHub Actions Contents write in that repository. If branch
-rules require a PR or block bot pushes, allow this publisher through those rules
-before enabling it; the workflow does not create branches or bypass protection.
-Vercel's existing GitHub integration then deploys the resulting main commit.
-
-## Publish a release
+## Publish a version
 
 1. Update `project(... VERSION ...)` in `CMakeLists.txt`.
-2. Add `packaging/updates/notes/VERSION.md` with the actual release notes.
-3. Commit and push the release source to `main`.
-4. Push the matching version tag, for example `v0.1.0`, or run **Release Forward**
-   manually with an existing tag. Tags must point to a commit contained in main.
+2. Optionally write `packaging/updates/notes/VERSION.md` for the GitHub Release
+   description. Otherwise GitHub generates release notes.
+3. Commit and push main, then push its matching tag, such as `v1.1.0`.
 
-`Release Forward` checks the version, notes, expected public feed URLs, public
-repository visibility, and matching private/public keys before building. It
-fails clearly when signing/publishing configuration is absent. It calls the
-same reusable Build apps workflow used by regular CI. Release-only metadata
-binds every artifact to its exact source commit, version, feed, and public key.
+Tags must have three numeric version components and match CMake's project
+version. All component widths are accepted, including `v1.12.3`. The tag must
+point to a commit contained in main. A normal main push only builds temporary
+Actions artifacts; a version-tag push publishes the signed permanent downloads.
+An existing tag can also be selected with **Actions > Release Forward > Run
+workflow**. A retry from main uses the corrected workflow/tooling while retaining
+the source commit identified by the original tag.
 
-After all three builds succeed, the release job:
+The workflow validates signing keys and build configuration, builds all three
+platforms, verifies each artifact's source/version/public-key metadata, and signs
+the final installers. It uploads everything to a draft GitHub Release and only
+publishes the release after all uploads succeed. Published releases are never
+replaced by this workflow; fix an already published build with a higher version.
+Failed unpublished draft uploads may be retried.
 
-1. Checks the artifact metadata and signs the final DMGs and Windows setup EXE.
-2. Generates one XML appcast per platform, including versions, notes, signatures,
-   exact sizes, compatibility, and versioned GitHub download URLs.
-3. Stages all packages, feeds, and `SHA256SUMS` in a draft GitHub Release.
-4. Publishes the release only after uploads finish.
-5. Dispatches Aperture's **Sync Forward updates** workflow with the release tag.
+## Permanent downloads and manual XML
 
-Aperture validates that all three feeds belong to that published stable release,
-match the published installer names and sizes, and contain update signatures.
-It preserves older feed entries, refuses version downgrades and replacement of
-a published version, then commits the feeds together. The sync trusts the public
-Forward release as its source; native Sparkle/WinSparkle cryptographically verify
-the downloaded packages using the public keys embedded in the installed app.
+The release contains:
 
-Feed deployment is asynchronous. A successful dispatch means Aperture's job was
-queued, not that Vercel has finished deploying it. Check the Aperture workflow
-and Vercel deployment before announcing availability. Feed caching is at most
-60 seconds at the CDN and revalidated by browsers.
+- `mirdain_forward-macos-arm64.dmg`
+- `mirdain_forward-macos-x86_64.dmg`
+- `mirdain_forward-windows-x64-setup.exe`
+- `signatures.json`
+- `SHA256SUMS`
 
-## Recovery and compatibility
+For example, the Apple Silicon v1.1.0 installer has this permanent versioned URL:
 
-If the build/sign/upload fails, the previous website feeds remain unchanged.
-Unpublished draft assets may be replaced on retry. Published releases are never
-overwritten by this workflow. If feed synchronization fails after publication,
-run **Sync Forward updates** in Aperture manually with the published tag; do not
-rebuild and replace that version. Fix a mistaken published build by issuing a
-higher version. A sync of an already imported release is harmless.
+```text
+https://github.com/ryanmirdain/mirdain_forward/releases/download/v1.1.0/mirdain_forward-macos-arm64.dmg
+```
 
-Use the Windows setup EXE as the update payload. Portable ZIPs remain available
-in GitHub Releases for developers but deliberately do not enable in-app updates.
-The installer preserves app data, reuses its installed directory, and protects
-running copies with a mutex. During a transfer Windows installation is declined
-until the user finishes sending and installs again; macOS defers the relaunch.
+`signatures.json` records the tag, version, source commit, and each installer's
+`url`, `length`, `edSignature`, `sha256`, platform, and `minimumSystemVersion`.
+The signatures are detached Ed25519 signatures over the exact installer bytes.
+Use those values when we manually write the website XML:
 
-The configured macOS baseline is 12.0 (Qt 6.9); Windows is 10.0.17763. Keep
-`PLATFORMS` in `tools/release_updates.py`, build deployment targets, and the
-installer minimum version aligned if those requirements change. Keep bundle
-IDs, installer AppId, and installation paths stable.
+| JSON field | XML field |
+| --- | --- |
+| top-level `version` | enclosure `sparkle:version` and `sparkle:shortVersionString` |
+| package `url` | enclosure `url` |
+| package `length` | enclosure `length` |
+| package `edSignature` | enclosure `sparkle:edSignature` |
+| package `os` | enclosure `sparkle:os` |
+| package `minimumSystemVersion` | item `sparkle:minimumSystemVersion` |
 
-Existing users need one manual installation of the first updater-enabled
-release. Builds without public-key configuration do not contact the feed server
-and cannot receive configuration retroactively.
+Write the release notes into each XML item's description or link them to a
+release-notes page. For Windows also use
+`sparkle:installerArguments="/SILENT /SP- /NOICONS"`. Templates in this directory
+are reference examples; replace all placeholders before publishing them.
+The XMLs live under `public/forward/updates/` on Aperture's deployed
+`codex/main-site-revamp` branch. Update and deploy that site separately after
+the installers are published. Until the XML is updated, clients continue seeing
+the previous release. No cross-repository credentials are involved in releasing
+Forward anymore.
 
-Manual XML templates remain here for reference. The automated pipeline generates
-the feeds directly; do not publish templates containing `@...@` placeholders.
+## Platform signing and compatibility
+
+This pipeline signs update packages for Sparkle/WinSparkle verification. Apple
+Developer ID signing/notarization and Windows Authenticode publisher signing
+remain deferred: the build still uses ad-hoc macOS signatures and unsigned
+Windows executables. Update-package signatures do not remove OS publisher
+warnings. Add OS signing before packaging and Ed25519 signing when that setup
+is ready; never change installer bytes after calculating an update signature.
+
+Release installers target macOS 12.0 and Windows 10.0.17763. Keep the deployment
+targets, installer minimum, and `PLATFORMS` in `tools/release_updates.py` aligned
+when requirements change. Existing clients need one manual installation of an
+updater-enabled release. Windows portable ZIPs remain regular CI artifacts,
+not published updater payloads; use the setup installer for updates.
