@@ -478,16 +478,23 @@ standard LAN `project_file` flow; firmware requiring signed commands remains
 unsupported without Developer Mode. No physical Prusa or Bambu printer was used
 to verify this implementation.
 
+`GET http://127.0.0.1:18744/health` returns
+`{"ok":true,"service":"mirdain_forward","version":"…"}` without contacting a
+printer or starting a transfer. The Forward download page uses this endpoint
+during guided setup. It must receive this response before saving the printer
+profile and forwarding the user to the slicer. Older releases without this
+endpoint need to be updated before completing guided setup.
+
 The server handles CORS preflights for `https://slicer.mirdainsystems.com`,
-`http://localhost:5173`, and `http://127.0.0.1:5173`. Other browser origins are
+`https://mirdainsystems.com`, `https://www.mirdainsystems.com`, and local development
+on `localhost` or `127.0.0.1` at ports 3000 and 5173. Other browser origins are
 rejected. Requests without an Origin header, such as native clients, are allowed.
 The server binds only to IPv4 loopback. The browser may request **loopback/local
 network access**; CORS between the website and this app is handled here, and
 the app's native requests to the printer are not subject to browser CORS.
 
-The web slicer's **Send and print** button uses this endpoint directly. There is no
-separate health check or availability polling; an unreachable app causes the send
-request to fail. Browser integration:
+The web slicer's **Send and print** button uses `/send` directly without
+availability polling; an unreachable app causes the send request to fail. Browser integration:
 
 ```js
 const response = await fetch('http://127.0.0.1:18744/send', {

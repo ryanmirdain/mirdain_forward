@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 if(CMAKE_HOST_APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version" FORCE)
 endif()
-project(mirdain_forward VERSION 1.1.0 LANGUAGES C CXX)
+project(mirdain_forward VERSION 1.1.1 LANGUAGES C CXX)
 
 include(FetchContent)
 if(POLICY CMP0135)

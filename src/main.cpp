@@ -44,7 +44,9 @@ constexpr quint16 Port = 18744;
 static bool allowedOrigin(const QByteArray &origin)
 {
     return origin.isEmpty() || origin == "https://slicer.mirdainsystems.com"
-        || origin == "http://localhost:5173" || origin == "http://127.0.0.1:5173";
+        || origin == "https://mirdainsystems.com" || origin == "https://www.mirdainsystems.com"
+        || origin == "http://localhost:5173" || origin == "http://127.0.0.1:5173"
+        || origin == "http://localhost:3000" || origin == "http://127.0.0.1:3000";
 }
 
 static QHttpServerResponse response(const QByteArray &origin, Status status, const QJsonObject &body)
@@ -53,8 +55,9 @@ static QHttpServerResponse response(const QByteArray &origin, Status status, con
     auto headers = result.headers();
     if (!origin.isEmpty() && allowedOrigin(origin)) {
         headers.append("Access-Control-Allow-Origin", origin);
-        headers.append("Access-Control-Allow-Methods", "POST, OPTIONS");
+        headers.append("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         headers.append("Access-Control-Allow-Headers", "Content-Type");
+        headers.append("Access-Control-Allow-Private-Network", "true");
         headers.append("Vary", "Origin");
     }
     result.setHeaders(headers);
@@ -105,6 +108,21 @@ public:
         tray.setToolTip("Mirdain Forward");
         tray.setContextMenu(&menu);
         tray.show();
+
+        server.route("/health", QHttpServerRequest::Method::Get | QHttpServerRequest::Method::Options,
+            this, [](const QHttpServerRequest &request) {
+                const auto origin = request.headers().value("Origin").toByteArray();
+                if (!allowedOrigin(origin))
+                    return response(origin, Status::Forbidden, {{"error", "Origin not allowed."}});
+                if (request.method() == QHttpServerRequest::Method::Options)
+                    return response(origin, Status::NoContent, {});
+                auto result = response(origin, Status::Ok, {{"ok", true}, {"service", "mirdain_forward"},
+                    {"version", QCoreApplication::applicationVersion()}});
+                auto headers = result.headers();
+                headers.append("Cache-Control", "no-store");
+                result.setHeaders(headers);
+                return result;
+            });
 
         server.route("/send", QHttpServerRequest::Method::Post | QHttpServerRequest::Method::Options,
             this, [this](const QHttpServerRequest &request, QHttpServerResponder &responder) {
