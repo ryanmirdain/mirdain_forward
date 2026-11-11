@@ -138,10 +138,10 @@ jobs:
         shell: bash
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
-          PLATFORM: ${{ matrix.platform }}-${{ matrix.cpu }}
+          FORWARD_RELEASE_PLATFORM: ${{ matrix.platform }}-${{ matrix.cpu }}
           FORWARD_UPDATE_PUBLIC_KEY_MACOS: ${{ vars.FORWARD_UPDATE_PUBLIC_KEY_MACOS }}
           FORWARD_UPDATE_PUBLIC_KEY_WINDOWS: ${{ vars.FORWARD_UPDATE_PUBLIC_KEY_WINDOWS }}
-        run: python tools/release_updates.py build-metadata --tag "$RELEASE_TAG" --platform "$PLATFORM" --output "dist/$PLATFORM.json"
+        run: python tools/release_updates.py build-metadata --tag "$RELEASE_TAG" --platform "$FORWARD_RELEASE_PLATFORM" --output "dist/$FORWARD_RELEASE_PLATFORM.json"
 
       - name: Upload app
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
