@@ -2,6 +2,7 @@
 #include "app/AppPreferences.h"
 #include "platform/NotificationSender.h"
 #include "platform/AppUpdater.h"
+#include "platform/SupportedBrowser.h"
 #include "printers/PrinterSender.h"
 #include "printers/PrinterSettings.h"
 #include "archive/ZipArchive.h"
@@ -40,6 +41,7 @@
 
 using Status = QHttpServerResponder::StatusCode;
 constexpr quint16 Port = 18744;
+static const QUrl SetupUrl(FORWARD_SETUP_URL "#setup");
 
 static bool allowedOrigin(const QByteArray &origin)
 {
@@ -98,6 +100,7 @@ class Forwarder : public QObject {
 public:
     Forwarder() : printerSettings(config, menu)
     {
+        menu.addAction("Set Up Printer…", this, [] { openInSupportedBrowser(SetupUrl); });
         status = menu.addAction("Idle - 127.0.0.1:18744");
         status->setEnabled(false);
         menu.addSeparator();
@@ -183,7 +186,12 @@ public:
         return listener->listen(QHostAddress::LocalHost, Port) && server.bind(listener);
     }
 
-    void promptOnFirstLaunch() { preferences.promptOnFirstLaunch(); updater.start(); }
+    void promptOnFirstLaunch()
+    {
+        // Forward is already listening, so the page can Verify it right away.
+        if (preferences.promptOnFirstLaunch()) openInSupportedBrowser(SetupUrl);
+        updater.start();
+    }
 
 private:
     QHttpServer server;

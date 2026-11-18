@@ -10,7 +10,8 @@ class QMenu;
 class AppPreferences {
 public:
     AppPreferences(AppConfig &config, NotificationSender &notifications, AppUpdater &updater, QMenu &menu);
-    void promptOnFirstLaunch();
+    // Returns true when the user chose Open Setup on the first-launch dialog.
+    bool promptOnFirstLaunch();
     bool notificationsEnabled() const;
 
 private:
@@ -19,5 +20,5 @@ private:
     AppUpdater &updater;
     StartupRegistration startup;
 
-    void showDialog(bool firstLaunch);
+    bool showDialog(bool firstLaunch);
 };

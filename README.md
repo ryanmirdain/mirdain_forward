@@ -9,7 +9,7 @@ ELEGOO, PrusaLink, or Bambu LAN printer, then requests printing. No account or
 queue. Printer names, IDs, and settings are saved locally; printer credentials
 arrive in each request.
 
-The menu lists each printer directly, followed by Check for Updates, Preferences, the current transfer status, and Quit. Only one
+The menu lists each printer directly, followed by Check for Updates, Preferences, Set Up Printer, the current transfer status, and Quit. Only one
 transfer runs at a time. Success means the printer accepted the print request, not that the
 first layer has begun. Busy printers are not interrupted. Start commands are
 never automatically retried; after an unconfirmed start, check the printer
@@ -24,10 +24,17 @@ Long menu status messages are ellipsized; the tray tooltip retains the full text
 
 On the first successful launch, Forward asks whether to **launch when you sign
 in** and **notify you when a plate is sent through Forward**. Both choices default
-to off. Save your choices, or choose **Skip** to keep the defaults; either option
-dismisses setup for future launches. Closing the setup dialog also skips it.
+to off. Choose **Open Setup** to save your choices, or **Skip** to keep the defaults;
+either option dismisses setup for future launches. Closing the setup dialog also skips it.
 Choose **Preferences…** from the menu bar / system tray to change either choice
 later. Existing users see the setup dialog once after updating.
+
+**Open Setup** also opens printer setup at
+`https://mirdainsystems.com/forward#setup` in the default browser, once. **Set Up
+Printer…** reopens the page at any time. On macOS, when Safari is the default, the page
+opens in an installed Chrome, Edge, Brave, Arc, Firefox, or Chromium instead, because
+Safari cannot reach Forward from the website (`src/platform/macos/SupportedBrowser.mm`). Test builds can point at a local preview with
+`-DFORWARD_SETUP_URL=http://localhost:3000/forward/` (Forward appends `#setup`).
 
 Automatic startup is registered only when you explicitly enable it. On macOS
 13+, `src/platform/macos/StartupRegistration.mm` uses ServiceManagement's

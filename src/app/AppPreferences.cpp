@@ -68,12 +68,12 @@ bool AppPreferences::notificationsEnabled() const
     return config.section("preferences").value("notifications_enabled").toBool();
 }
 
-void AppPreferences::promptOnFirstLaunch()
+bool AppPreferences::promptOnFirstLaunch()
 {
-    if (!config.section("preferences").value("setup_complete").toBool()) showDialog(true);
+    return !config.section("preferences").value("setup_complete").toBool() && showDialog(true);
 }
 
-void AppPreferences::showDialog(bool firstLaunch)
+bool AppPreferences::showDialog(bool firstLaunch)
 {
     const auto status = startup.status();
     const bool registered = status == StartupRegistration::Status::Enabled
@@ -201,7 +201,7 @@ void AppPreferences::showDialog(bool firstLaunch)
     layout->addSpacing(16);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
     buttons->setStyleSheet("QDialogButtonBox { button-layout: 1; }");
-    buttons->button(QDialogButtonBox::Save)->setText("Save preferences");
+    buttons->button(QDialogButtonBox::Save)->setText(firstLaunch ? "Open Setup" : "Save preferences");
     buttons->button(QDialogButtonBox::Save)->setDefault(true);
     if (firstLaunch) buttons->button(QDialogButtonBox::Cancel)->setText("Skip");
     layout->addWidget(buttons);
@@ -211,7 +211,7 @@ void AppPreferences::showDialog(bool firstLaunch)
     applyDarkTitleBar(dialog);
 #endif
     const bool accepted = dialog.exec() == QDialog::Accepted;
-    if (!accepted && !firstLaunch) return;
+    if (!accepted && !firstLaunch) return false;
 
     try {
         const bool launchEnabled = accepted ? launch->isChecked() : registered;
@@ -232,4 +232,5 @@ void AppPreferences::showDialog(bool firstLaunch)
     } catch (const std::exception &error) {
         QMessageBox::critical(nullptr, "Mirdain Forward", QString::fromUtf8(error.what()));
     }
+    return accepted;
 }

@@ -36,7 +36,12 @@ set(CPACK_PACKAGE_NAME "Mirdain Forward")
 set(CPACK_PACKAGE_VENDOR "Mirdain Systems")
 set(CPACK_PACKAGE_FILE_NAME "mirdain_forward-macos-${package_arch}")
 set(CPACK_PACKAGE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/dist")
-set(CPACK_DMG_VOLUME_NAME "Mirdain Forward")
+set(CPACK_DMG_VOLUME_NAME "Mirdain Forward Setup")
+set(CPACK_DMG_BACKGROUND_IMAGE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/installer/background.tiff")
+set(CPACK_DMG_DS_STORE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/installer/Finder.DS_Store")
+install(CODE [[
+    execute_process(COMMAND /usr/bin/chflags hidden "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/Licenses")
+]] COMPONENT Forward)
 set(CPACK_DMG_FORMAT UDZO)
 set(CPACK_PACKAGING_INSTALL_PREFIX /)
 # Package only Forward, excluding third-party development files and libraries.

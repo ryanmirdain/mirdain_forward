@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 if(CMAKE_HOST_APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version" FORCE)
 endif()
-project(mirdain_forward VERSION 1.1.1 LANGUAGES C CXX)
+project(mirdain_forward VERSION 1.1.2 LANGUAGES C CXX)
 
 include(FetchContent)
 if(POLICY CMP0135)
@@ -32,6 +32,7 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/app/AppPreferences.h src/app/AppPreferences.cpp
     src/archive/ZipArchive.h src/archive/ZipArchive.cpp
     src/platform/StartupRegistration.h
+    src/platform/SupportedBrowser.h
     src/platform/NotificationSender.h
     src/printers/PrinterSettings.h src/printers/PrinterSettings.cpp
     src/printers/PrinterSendJob.h
@@ -61,6 +62,9 @@ set_target_properties(mirdain_forward PROPERTIES
 )
 
 include(cmake/Updates.cmake)
+# Opened from the first-launch dialog and Set Up Printer…; override only for local test builds.
+set(FORWARD_SETUP_URL "https://mirdainsystems.com/forward" CACHE STRING "Forward page that hosts printer setup")
+target_compile_definitions(mirdain_forward PRIVATE FORWARD_SETUP_URL="${FORWARD_SETUP_URL}")
 
 if(APPLE)
     set_target_properties(mirdain_forward PROPERTIES OUTPUT_NAME "Mirdain Forward")
@@ -70,11 +74,13 @@ if(APPLE)
     target_sources(mirdain_forward PRIVATE
         src/platform/macos/NotificationSender.mm
         src/platform/macos/StartupRegistration.mm
+        src/platform/macos/SupportedBrowser.mm
         src/platform/macos/WindowStyle.h src/platform/macos/WindowStyle.mm
     )
     set_source_files_properties(
         src/platform/macos/NotificationSender.mm
         src/platform/macos/StartupRegistration.mm
+        src/platform/macos/SupportedBrowser.mm
         src/platform/macos/WindowStyle.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
     )
@@ -123,11 +129,13 @@ elseif(WIN32)
     target_sources(mirdain_forward PRIVATE
         src/platform/windows/NotificationSender.cpp
         src/platform/windows/StartupRegistration.cpp
+        src/platform/generic/SupportedBrowser.cpp
     )
 else()
     target_sources(mirdain_forward PRIVATE
         src/platform/generic/NotificationSender.cpp
         src/platform/generic/StartupRegistration.cpp
+        src/platform/generic/SupportedBrowser.cpp
     )
 endif()
 
