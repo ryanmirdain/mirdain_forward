@@ -201,7 +201,7 @@ src/
   main.cpp              HTTP forwarding and app lifecycle
   app/                  Shared JSON config and preferences UI
   archive/              ZIP archive reader
-  platform/             Startup, notification, and updater interfaces
+  platform/             Startup, notification, updater, and USB drive interfaces
     macos/              Native macOS implementations
     windows/            Windows startup registration and Qt notifications
     generic/            Fallback notifications and unsupported startup
@@ -374,6 +374,25 @@ Invalid requests return 400, overlapping transfers return 409, and failed
 downloads, invalid archives, rejected uploads, or failed starts return 502 with
 `{"error":"…"}`. A timeout after sending start may mean the command was accepted;
 check the printer before retrying. The app does not automatically retry start.
+
+### Save to USB
+
+`POST http://127.0.0.1:18744/usb` with `{"url": "…", "download_headers": {"Authorization": "Bearer …"}}`
+downloads one plate file (the slicer's `.gcode` or `.gcode.3mf` plate output, named
+by its `Content-Disposition` filename) and copies it to the root of the first
+mounted, writable USB drive or SD card (`src/platform/*/RemovableDrives.cpp`:
+DiskArbitration on macOS, `DRIVE_REMOVABLE` on Windows, `/media` or `/run/media`
+on Linux). Existing files are kept; the copy gets a `-2`, `-3`, … suffix.
+
+After saving, Forward ejects the drive (`diskutil eject` on macOS, a volume
+lock/dismount/eject on Windows, `udisksctl` unmount and power-off on Linux).
+
+Success is HTTP 200 with `{"ok":true,"filename":"…","drive":"…","path":"…","ejected":true}`.
+If the file was saved but the eject failed (for example, another app has the drive
+open), `ejected` is `false` and `eject_error` gives the reason.
+With no drive connected it returns 404 with `{"code":"no_usb","error":"…"}`
+before downloading. It shares the one-transfer limit with `/send` (409), and
+download or write failures return 502 with `{"error":"…"}`.
 
 ## Connection protocols
 

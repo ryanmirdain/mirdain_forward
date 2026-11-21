@@ -34,6 +34,7 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/platform/StartupRegistration.h
     src/platform/SupportedBrowser.h
     src/platform/NotificationSender.h
+    src/platform/RemovableDrives.h
     src/printers/PrinterSettings.h src/printers/PrinterSettings.cpp
     src/printers/PrinterSendJob.h
     src/printers/PrinterSender.h src/printers/PrinterSender.cpp
@@ -76,6 +77,7 @@ if(APPLE)
         src/platform/macos/StartupRegistration.mm
         src/platform/macos/SupportedBrowser.mm
         src/platform/macos/WindowStyle.h src/platform/macos/WindowStyle.mm
+        src/platform/macos/RemovableDrives.cpp
     )
     set_source_files_properties(
         src/platform/macos/NotificationSender.mm
@@ -87,7 +89,8 @@ if(APPLE)
     find_library(user_notifications UserNotifications REQUIRED)
     find_library(service_management ServiceManagement REQUIRED)
     find_library(appkit AppKit REQUIRED)
-    target_link_libraries(mirdain_forward PRIVATE "${user_notifications}" "${service_management}" "${appkit}")
+    find_library(disk_arbitration DiskArbitration REQUIRED)
+    target_link_libraries(mirdain_forward PRIVATE "${user_notifications}" "${service_management}" "${appkit}" "${disk_arbitration}")
     target_sources(mirdain_forward PRIVATE assets/Icon.icns)
     set_source_files_properties(assets/Icon.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     target_sources(mirdain_forward PRIVATE packaging/OpenSSL-LICENSE.txt)
@@ -129,12 +132,14 @@ elseif(WIN32)
     target_sources(mirdain_forward PRIVATE
         src/platform/windows/NotificationSender.cpp
         src/platform/windows/StartupRegistration.cpp
+        src/platform/windows/RemovableDrives.cpp
         src/platform/generic/SupportedBrowser.cpp
     )
 else()
     target_sources(mirdain_forward PRIVATE
         src/platform/generic/NotificationSender.cpp
         src/platform/generic/StartupRegistration.cpp
+        src/platform/generic/RemovableDrives.cpp
         src/platform/generic/SupportedBrowser.cpp
     )
 endif()

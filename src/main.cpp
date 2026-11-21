@@ -2,6 +2,7 @@
 #include "app/AppPreferences.h"
 #include "platform/NotificationSender.h"
 #include "platform/AppUpdater.h"
+#include "platform/RemovableDrives.h"
 #include "platform/SupportedBrowser.h"
 #include "printers/PrinterSender.h"
 #include "printers/PrinterSettings.h"
@@ -36,6 +37,7 @@
 #include <qt_windows.h>
 #endif
 
+#include <functional>
 #include <memory>
 #include <stdexcept>
 
@@ -93,7 +95,10 @@ struct Job {
     QString sliceId;
     QString filename;
     QJsonObject connection;
-    PrinterSender *sender;
+    PrinterSender *sender = nullptr;
+    QStorageInfo drive;
+    QString doneMessage;
+    QJsonObject result;
 };
 
 class Forwarder : public QObject {
@@ -161,7 +166,11 @@ public:
                     connect(sender, &PrinterSender::progress, this, [this](const QString &message) {
                         status->setText(message);
                     });
-                    connect(sender, &PrinterSender::completed, this, [this, job] { finish(job); });
+                    connect(sender, &PrinterSender::completed, this, [this, job] {
+                        job->doneMessage = "Print requested " + job->filename;
+                        job->result = {{"ok", true}, {"print_requested", true}, {"filename", job->filename}, {"plate", 0}};
+                        finish(job);
+                    });
                     connect(sender, &PrinterSender::failed, this, [this, job](const QString &error) { finish(job, error); });
                     job->sliceId = body.value("slice_id").toString();
                     if (!updater.beginTransfer()) {
@@ -173,7 +182,53 @@ public:
                     printerSettings.setBusy(true);
                     if (preferences.notificationsEnabled())
                         notifications.send("Print request received", "Preparing Plate 1 for " + sender->name() + ".");
-                    download(job, url);
+                    download(job, url, [this, job] { sendPlate(job); });
+                } catch (const std::exception &error) {
+                    responder.sendResponse(response(origin, Status::BadRequest, {{"error", error.what()}}));
+                }
+            });
+
+        // Saves one plate file (.gcode or .gcode.3mf) to a connected USB drive or SD card.
+        server.route("/usb", QHttpServerRequest::Method::Post | QHttpServerRequest::Method::Options,
+            this, [this](const QHttpServerRequest &request, QHttpServerResponder &responder) {
+                const auto origin = request.headers().value("Origin").toByteArray();
+                if (!allowedOrigin(origin)) {
+                    responder.sendResponse(response(origin, Status::Forbidden, {{"error", "Origin not allowed."}}));
+                    return;
+                }
+                if (request.method() == QHttpServerRequest::Method::Options) {
+                    responder.sendResponse(response(origin, Status::NoContent, {}));
+                    return;
+                }
+                if (active) {
+                    responder.sendResponse(response(origin, Status::Conflict, {{"error", "A transfer is already running."}}));
+                    return;
+                }
+                if (request.body().size() > 64 * 1024 || !request.headers().value("Content-Type").startsWith("application/json")) {
+                    responder.sendResponse(response(origin, Status::BadRequest, {{"error", "Send application/json, up to 64 KiB."}}));
+                    return;
+                }
+                try {
+                    const auto body = parseObject(request.body());
+                    const QUrl url(body.value("url").toString());
+                    if (!url.isValid() || url.host().isEmpty() || (url.scheme() != "http" && url.scheme() != "https"))
+                        throw std::runtime_error("url must be an HTTP(S) download link to a plate file.");
+                    const auto drives = removableDrives();
+                    if (drives.isEmpty()) {
+                        responder.sendResponse(response(origin, Status::NotFound, {{"error", "No USB drive is connected."}, {"code", "no_usb"}}));
+                        return;
+                    }
+                    auto job = std::make_shared<Job>(std::move(responder));
+                    job->origin = origin;
+                    job->downloadAuthorization = body.value("download_headers").toObject().value("Authorization").toString().toUtf8();
+                    job->drive = drives.first();
+                    if (!updater.beginTransfer()) {
+                        job->responder.sendResponse(response(origin, Status::Conflict, {{"error", "Forward is restarting to install an update."}}));
+                        return;
+                    }
+                    active = job;
+                    printerSettings.setBusy(true);
+                    download(job, url, [this, job] { saveToDrive(job); });
                 } catch (const std::exception &error) {
                     responder.sendResponse(response(origin, Status::BadRequest, {{"error", error.what()}}));
                 }
@@ -208,25 +263,24 @@ private:
 
     void finish(std::shared_ptr<Job> job, const QString &error = {})
     {
-        job->sender->disconnect(this);
-        const auto message = error.isEmpty() ? "Print requested " + job->filename : error;
+        if (job->sender) job->sender->disconnect(this);
+        const auto message = error.isEmpty() ? job->doneMessage : error;
         status->setText(QFontMetrics(menu.font()).elidedText(message, Qt::ElideMiddle, 360));
         tray.setToolTip("Mirdain Forward - " + message);
         job->responder.sendResponse(response(job->origin, error.isEmpty() ? Status::Ok : Status::BadGateway,
-            error.isEmpty() ? QJsonObject{{"ok", true}, {"print_requested", true}, {"filename", job->filename}, {"plate", 0}}
-                            : QJsonObject{{"error", error}}));
+            error.isEmpty() ? job->result : QJsonObject{{"error", error}}));
         active.reset();
         printerSettings.setBusy(false);
         updater.endTransfer();
     }
 
-    void download(const std::shared_ptr<Job> &job, const QUrl &url)
+    void download(const std::shared_ptr<Job> &job, const QUrl &url, std::function<void()> downloaded)
     {
         if (!job->archive.open()) {
             finish(job, job->archive.errorString());
             return;
         }
-        status->setText("Downloading .mirdain…");
+        status->setText("Downloading…");
         QNetworkRequest request(url);
         request.setTransferTimeout(180000);
         if (!job->downloadAuthorization.isEmpty()) {
@@ -235,7 +289,7 @@ private:
         }
         auto *reply = network.get(request);
         connect(reply, &QNetworkReply::readyRead, this, [job, reply] { job->archive.write(reply->readAll()); });
-        connect(reply, &QNetworkReply::finished, this, [this, job, reply] {
+        connect(reply, &QNetworkReply::finished, this, [this, job, reply, downloaded] {
             reply->deleteLater();
             if (reply->error() != QNetworkReply::NoError) {
                 finish(job, "Download failed: " + reply->errorString());
@@ -246,42 +300,88 @@ private:
                 finish(job, job->archive.errorString());
                 return;
             }
-            try {
-                ZipArchive archive(job->archive);
-                const auto manifest = parseObject(archive.read("manifest.json"));
-                const auto slices = manifest.value("slices").toArray();
-                if (manifest.value("format").toString() != "mirdain" || slices.isEmpty())
-                    throw std::runtime_error("The archive has no Mirdain slices.");
-                QJsonObject slice = slices.first().toObject();
-                if (!job->sliceId.isEmpty()) {
-                    slice = {};
-                    for (const auto &entry : slices)
-                        if (entry.toObject().value("id").toString() == job->sliceId) slice = entry.toObject();
-                }
-                const auto member = slice.contains("plate_paths")
-                    ? slice.value("plate_paths").toObject().value("0").toString()
-                    : slice.value("path").toString();
-                if (slice.value("format").toString() != "gcode.3mf" || !member.endsWith(".gcode.3mf"))
-                    throw std::runtime_error("The selected slice has no .gcode.3mf output for plate 0.");
-                // Each native per-plate package contains one plain .gcode file.
-                auto package = archive.read(member);
-                QBuffer plate(&package);
-                plate.open(QIODevice::ReadOnly);
-                ZipArchive nativePlate(plate);
-                const bool native = job->sender->fileFormat() == PrinterFile::Format::Gcode3mf;
-                const auto gcodePath = plateGcodePath(nativePlate, native);
-                auto gcode = nativePlate.read(gcodePath);
-                if (gcode.isEmpty()) throw std::runtime_error("The sliced plate is empty.");
-                job->filename = QFileInfo(member).fileName();
-                if (!native) job->filename.chop(4); // .gcode.3mf -> .gcode
-                job->filename.replace(QRegularExpression("[^A-Za-z0-9._-]"), "_");
-                const auto md5 = QCryptographicHash::hash(gcode, QCryptographicHash::Md5).toHex();
-                job->sender->send({native ? nativePlate.withoutDirectory("Objects") : std::move(gcode), job->filename,
-                    slice.value("bed_type").toString(), native ? gcodePath : QString{}, md5}, job->connection);
-            } catch (const std::exception &error) {
-                finish(job, QString::fromUtf8(error.what()));
-            }
+            // The slicer names plate downloads with an RFC 5987 Content-Disposition filename.
+            const auto disposition = QString::fromUtf8(reply->rawHeader("Content-Disposition"));
+            const auto encoded = disposition.section("filename*=utf-8''", 1, 1, QString::SectionCaseInsensitiveSeps).section(';', 0, 0);
+            job->filename = QUrl::fromPercentEncoding(encoded.toUtf8());
+            downloaded();
         });
+    }
+
+    void saveToDrive(const std::shared_ptr<Job> &job)
+    {
+        job->drive.refresh();
+        if (!job->drive.isValid() || !job->drive.isReady()) {
+            finish(job, "The USB drive was disconnected.");
+            return;
+        }
+        job->filename.replace(QRegularExpression("[^A-Za-z0-9._-]"), "_");
+        if (job->filename.isEmpty()) {
+            finish(job, "The plate download had no filename.");
+            return;
+        }
+        const QDir root(job->drive.rootPath());
+        const QFileInfo name(job->filename);
+        auto path = root.filePath(job->filename);
+        for (int copy = 2; QFileInfo::exists(path); ++copy)
+            path = root.filePath(QString("%1-%2.%3").arg(name.baseName()).arg(copy).arg(name.completeSuffix()));
+        status->setText("Saving to " + job->drive.displayName() + "…");
+        if (!QFile::copy(job->archive.fileName(), path)) {
+            finish(job, "Could not save to " + job->drive.displayName() + ". Check that the drive is writable and has free space.");
+            return;
+        }
+        job->filename = QFileInfo(path).fileName();
+        const auto driveName = job->drive.displayName();
+        status->setText("Ejecting " + driveName + "…");
+        // The file is saved either way; an eject failure is reported, not treated as a failed save.
+        ejectDrive(job->drive, this, [this, job, path, driveName](const QString &ejectError) {
+            job->doneMessage = "Saved " + job->filename + " to " + driveName
+                + (ejectError.isEmpty() ? ". Safe to remove." : ", but it could not be ejected.");
+            job->result = {{"ok", true}, {"filename", job->filename}, {"drive", driveName}, {"path", path},
+                {"ejected", ejectError.isEmpty()}};
+            if (!ejectError.isEmpty()) job->result.insert("eject_error", ejectError);
+            if (preferences.notificationsEnabled()) notifications.send("Saved to USB", job->doneMessage);
+            finish(job);
+        });
+    }
+
+    void sendPlate(const std::shared_ptr<Job> &job)
+    {
+        try {
+            ZipArchive archive(job->archive);
+            const auto manifest = parseObject(archive.read("manifest.json"));
+            const auto slices = manifest.value("slices").toArray();
+            if (manifest.value("format").toString() != "mirdain" || slices.isEmpty())
+                throw std::runtime_error("The archive has no Mirdain slices.");
+            QJsonObject slice = slices.first().toObject();
+            if (!job->sliceId.isEmpty()) {
+                slice = {};
+                for (const auto &entry : slices)
+                    if (entry.toObject().value("id").toString() == job->sliceId) slice = entry.toObject();
+            }
+            const auto member = slice.contains("plate_paths")
+                ? slice.value("plate_paths").toObject().value("0").toString()
+                : slice.value("path").toString();
+            if (slice.value("format").toString() != "gcode.3mf" || !member.endsWith(".gcode.3mf"))
+                throw std::runtime_error("The selected slice has no .gcode.3mf output for plate 0.");
+            // Each native per-plate package contains one plain .gcode file.
+            auto package = archive.read(member);
+            QBuffer plate(&package);
+            plate.open(QIODevice::ReadOnly);
+            ZipArchive nativePlate(plate);
+            const bool native = job->sender->fileFormat() == PrinterFile::Format::Gcode3mf;
+            const auto gcodePath = plateGcodePath(nativePlate, native);
+            auto gcode = nativePlate.read(gcodePath);
+            if (gcode.isEmpty()) throw std::runtime_error("The sliced plate is empty.");
+            job->filename = QFileInfo(member).fileName();
+            if (!native) job->filename.chop(4); // .gcode.3mf -> .gcode
+            job->filename.replace(QRegularExpression("[^A-Za-z0-9._-]"), "_");
+            const auto md5 = QCryptographicHash::hash(gcode, QCryptographicHash::Md5).toHex();
+            job->sender->send({native ? nativePlate.withoutDirectory("Objects") : std::move(gcode), job->filename,
+                slice.value("bed_type").toString(), native ? gcodePath : QString{}, md5}, job->connection);
+        } catch (const std::exception &error) {
+            finish(job, QString::fromUtf8(error.what()));
+        }
     }
 };
 
