@@ -43,6 +43,8 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/printers/PrusaBgcode.h src/printers/PrusaBgcode.cpp
     src/printers/BambuSender.h src/printers/BambuSender.cpp
     src/printers/BambuFtpsUpload.h src/printers/BambuFtpsUpload.cpp
+    src/platform/SlicerWindow.h src/platform/SlicerWindow.cpp
+    src/platform/ApplicationReopen.h
 )
 qt_add_resources(mirdain_forward assets PREFIX "/" FILES
     assets/mirdain-mark.png
@@ -64,8 +66,10 @@ set_target_properties(mirdain_forward PROPERTIES
 
 include(cmake/Updates.cmake)
 # Opened from the first-launch dialog and Set Up Printer…; override only for local test builds.
-set(FORWARD_SETUP_URL "https://mirdainsystems.com/forward" CACHE STRING "Forward page that hosts printer setup")
-target_compile_definitions(mirdain_forward PRIVATE FORWARD_SETUP_URL="${FORWARD_SETUP_URL}")
+set(FORWARD_SETUP_URL "https://mirdainsystems.com/forward/" CACHE STRING "Forward page that hosts printer setup")
+# Loaded by Open Slicer; override only for local test builds, e.g. http://localhost:5173/.
+set(FORWARD_SLICER_URL "https://slicer.mirdainsystems.com/" CACHE STRING "Web slicer opened in the slicer window")
+target_compile_definitions(mirdain_forward PRIVATE FORWARD_SETUP_URL="${FORWARD_SETUP_URL}" FORWARD_SLICER_URL="${FORWARD_SLICER_URL}")
 
 if(APPLE)
     set_target_properties(mirdain_forward PROPERTIES OUTPUT_NAME "Mirdain Forward")
@@ -78,19 +82,24 @@ if(APPLE)
         src/platform/macos/SupportedBrowser.mm
         src/platform/macos/WindowStyle.h src/platform/macos/WindowStyle.mm
         src/platform/macos/RemovableDrives.cpp
+        src/platform/macos/SlicerWindow.mm
+        src/platform/macos/ApplicationReopen.mm
     )
     set_source_files_properties(
         src/platform/macos/NotificationSender.mm
         src/platform/macos/StartupRegistration.mm
         src/platform/macos/SupportedBrowser.mm
         src/platform/macos/WindowStyle.mm
+        src/platform/macos/SlicerWindow.mm
+        src/platform/macos/ApplicationReopen.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
     )
     find_library(user_notifications UserNotifications REQUIRED)
     find_library(service_management ServiceManagement REQUIRED)
     find_library(appkit AppKit REQUIRED)
     find_library(disk_arbitration DiskArbitration REQUIRED)
-    target_link_libraries(mirdain_forward PRIVATE "${user_notifications}" "${service_management}" "${appkit}" "${disk_arbitration}")
+    find_library(webkit WebKit REQUIRED)
+    target_link_libraries(mirdain_forward PRIVATE "${user_notifications}" "${service_management}" "${appkit}" "${disk_arbitration}" "${webkit}")
     target_sources(mirdain_forward PRIVATE assets/Icon.icns)
     set_source_files_properties(assets/Icon.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     target_sources(mirdain_forward PRIVATE packaging/OpenSSL-LICENSE.txt)
@@ -134,13 +143,32 @@ elseif(WIN32)
         src/platform/windows/StartupRegistration.cpp
         src/platform/windows/RemovableDrives.cpp
         src/platform/generic/SupportedBrowser.cpp
+        src/platform/windows/SlicerWindow.cpp
+        src/platform/generic/ApplicationReopen.cpp
     )
+    # WebView2 SDK headers and static loader; the runtime ships with Windows 10 and 11.
+    FetchContent_Declare(webview2
+        URL https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.4258.31
+        URL_HASH SHA256=56f7f4b8bf9aee4b8efefbbdd4f67d5f74ebd1b100ed0806da71bf76af481aa9
+        DOWNLOAD_NAME webview2.zip
+        TIMEOUT 60
+    )
+    FetchContent_MakeAvailable(webview2)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(webview2_arch x64)
+    else()
+        set(webview2_arch x86)
+    endif()
+    target_include_directories(mirdain_forward PRIVATE "${webview2_SOURCE_DIR}/build/native/include")
+    target_link_libraries(mirdain_forward PRIVATE "${webview2_SOURCE_DIR}/build/native/${webview2_arch}/WebView2LoaderStatic.lib" version)
 else()
     target_sources(mirdain_forward PRIVATE
         src/platform/generic/NotificationSender.cpp
         src/platform/generic/StartupRegistration.cpp
         src/platform/generic/RemovableDrives.cpp
         src/platform/generic/SupportedBrowser.cpp
+        src/platform/generic/SlicerWindow.cpp
+        src/platform/generic/ApplicationReopen.cpp
     )
 endif()
 

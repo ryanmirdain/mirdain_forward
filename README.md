@@ -9,7 +9,7 @@ ELEGOO, PrusaLink, or Bambu LAN printer, then requests printing. No account or
 queue. Printer names, IDs, and settings are saved locally; printer credentials
 arrive in each request.
 
-The menu lists each printer directly, followed by Check for Updates, Preferences, Set Up Printer, the current transfer status, and Quit. Only one
+The menu starts with Open Slicer and Set Up Printer, then lists each printer directly, followed by Check for Updates, Preferences, the current transfer status, and Quit. Only one
 transfer runs at a time. Success means the printer accepted the print request, not that the
 first layer has begun. Busy printers are not interrupted. Start commands are
 never automatically retried; after an unconfirmed start, check the printer
@@ -30,7 +30,7 @@ Choose **Preferences…** from the menu bar / system tray to change either choic
 later. Existing users see the setup dialog once after updating.
 
 **Open Setup** also opens printer setup at
-`https://mirdainsystems.com/forward#setup` in the default browser, once. **Set Up
+`https://mirdainsystems.com/forward/#setup` in the default browser, once. **Set Up
 Printer…** reopens the page at any time. On macOS, when Safari is the default, the page
 opens in an installed Chrome, Edge, Brave, Arc, Firefox, or Chromium instead, because
 Safari cannot reach Forward from the website (`src/platform/macos/SupportedBrowser.mm`). Test builds can point at a local preview with
@@ -56,7 +56,9 @@ offers **Open startup settings…**. The Windows checkbox indicates the Run entr
 is registered; Windows Settings or Task Manager can disable it separately.
 Forward never re-registers startup merely because it launches or its saved
 preference is enabled, so OS-level changes are respected. Reopening Forward
-while it is already running exits quietly.
+while it is already running opens the slicer window: macOS sends the running app a
+reopen event, and on other platforms the second instance posts `/show` to the running
+one before exiting.
 
 `AppPreferences` owns the shared setup/preferences dialog. `StartupRegistration`
 and `NotificationSender` provide platform-specific behavior behind shared class
