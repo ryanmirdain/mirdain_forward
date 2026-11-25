@@ -4,15 +4,17 @@
 #include "app/LocalAddress.h"
 #include "app/SetupServer.h"
 #include "platform/DragWatcher.h"
-#include "platform/NotificationSender.h"
+#include "app/Notifications.h"
 #include "platform/AppUpdater.h"
 #include "platform/ApplicationReopen.h"
 #include "platform/RemovableDrives.h"
+#include "platform/ShellMenu.h"
 #include "platform/SlicerWindow.h"
 #include "printers/BambuFilaments.h"
 #include "printers/PrinterSender.h"
 #include "printers/PrinterSettings.h"
 #include "archive/ZipArchive.h"
+#include "gwaith/GwaithRuns.h"
 
 #include <QApplication>
 #include <QBuffer>
@@ -52,6 +54,8 @@
 using Status = QHttpServerResponder::StatusCode;
 using Reply = std::function<void(Status, const QJsonObject &)>;
 static const QUrl SlicerUrl(FORWARD_SLICER_URL);
+// Plate notifications close themselves this long after the transfer ends.
+constexpr int PlateNotificationTimeout = 8000;
 
 // The slicer locked to Forward's organization: with organization set, and force_org not false,
 // it hides its organization picker. Unlocked until an organization is chosen.
@@ -98,6 +102,13 @@ static QStringList modelPaths(const QStringList &arguments)
     return paths;
 }
 
+// The printer chosen in Explorer's Send to Gwaith menu, which passes it before the model.
+static QString gwaithPrinter(const QStringList &arguments)
+{
+    const auto index = arguments.indexOf(ShellMenu::Argument);
+    return index >= 0 && index + 1 < arguments.size() ? arguments[index + 1] : QString();
+}
+
 static QJsonObject parseObject(const QByteArray &bytes)
 {
     QJsonParseError error;
@@ -127,6 +138,11 @@ struct Job {
     PrinterSender *sender = nullptr;
     QStorageInfo drive;
     QString doneMessage;
+    // The plate notification's title while the transfer runs.
+    QString noticeTitle;
+    // Set for a send that reports its own progress, as a Gwaith run does, instead of a plate
+    // notification.
+    std::function<void(const QString &)> progress;
     QJsonObject result;
 };
 
@@ -136,6 +152,13 @@ public:
     {
         status = menu.addAction("Idle - 127.0.0.1:18744");
         status->setEnabled(false);
+        // Gwaith's background slicing, shown as notifications. Clicking a run, which is possible
+        // only while it has a session, opens that session and its chat.
+        gwaith = std::make_unique<GwaithRuns>(account, network, notifications, menu, status, [this](const GwaithAutoSlice &run) {
+            slicer->openSession(run.sessionId(), run.conversationId(), run.organization());
+        }, [this](GwaithAutoSlice &run, std::function<void(const QString &)> progress, std::function<void(const QString &)> done) {
+            sendGwaithPlate(run, std::move(progress), std::move(done));
+        });
         menu.addSeparator();
         menu.addAction("Quit", qApp, &QApplication::quit);
         QIcon icon(":/assets/mirdain-mark.png");
@@ -228,34 +251,44 @@ public:
         setup.organizationChanged = [this] {
             updateOrganizationAction();
             slicer->setSlicerUrl(slicerUrl(account.organization()));
+            updateShellMenu();
         };
+        updateShellMenu();
         // Signing in happens in the browser; come back to the window after it. The slicer in the
         // window shares the account, so it reloads its session either way.
         account.changed = [this] {
             slicer->accountChanged();
             // Signing out forgets the organization, which unlocks the slicer's.
             slicer->setSlicerUrl(slicerUrl(account.organization()));
+            updateShellMenu();
             if (account.signedIn()) slicer->show();
         };
-        // Models dropped on the panel that appears under the tray icon during a drag go to Gwaith.
+        // Models dropped on the panel that appears under the tray icon during a drag go to Gwaith,
+        // which slices them in the background (see GwaithRuns).
         dragWatcher = std::make_unique<DragWatcher>(tray, [this] {
             QList<DragWatcher::Target> targets;
             for (const auto &printer : printerSettings.entries()) targets.append({printer.id, printer.name});
             return targets;
-        }, [this](const QStringList &paths, const DragWatcher::Target &target) {
-            slicer->sendToGwaith(modelPaths(paths), {{"id", target.printerId}, {"name", target.name}});
+        }, [this](const QStringList &dropped, const DragWatcher::Target &target, const QString &notes) {
+            startGwaith(dropped, {target.printerId, target.name}, notes);
         });
 
         // Launching Forward again while it runs opens the slicer window: a second instance
-        // posts /show, with any model paths it was given, before exiting. macOS instead sends
-        // the running app a reopen event, or a file open event for models.
+        // posts /show, with any model paths it was given, before exiting. With gwaith_printer,
+        // from Explorer's Send to Gwaith menu, the models go to Gwaith instead. macOS sends the
+        // running app a reopen event, or a file open event for models.
         server.route("/show", QHttpServerRequest::Method::Post, this, [this](const QHttpServerRequest &request) {
             if (request.headers().contains("Origin"))
                 return QHttpServerResponse(Status::Forbidden);
             QStringList paths;
-            if (!request.body().isEmpty())
-                for (const auto &path : parseObject(request.body()).value("paths").toArray()) paths.append(path.toString());
-            if (paths.isEmpty()) slicer->show();
+            QString printer;
+            if (!request.body().isEmpty()) {
+                const auto body = parseObject(request.body());
+                for (const auto &path : body.value("paths").toArray()) paths.append(path.toString());
+                printer = body.value("gwaith_printer").toString();
+            }
+            if (!printer.isEmpty()) sendToGwaith(paths, printer);
+            else if (paths.isEmpty()) slicer->show();
             else slicer->openFiles(modelPaths(paths));
             return QHttpServerResponse(Status::NoContent);
         });
@@ -263,6 +296,15 @@ public:
     }
 
     void openModels(const QStringList &paths) { slicer->openFiles(paths); }
+
+    // Models from Explorer's Send to Gwaith menu, for the Forward printer with this ID.
+    void sendToGwaith(const QStringList &paths, const QString &printerId)
+    {
+        QString name;
+        for (const auto &printer : printerSettings.entries())
+            if (printer.id == printerId) name = printer.name;
+        startGwaith(paths, {printerId, name}, {});
+    }
 
     bool listen()
     {
@@ -290,9 +332,9 @@ private:
     AppConfig config;
     PrinterSettings printerSettings;
     QSystemTrayIcon tray;
-    NotificationSender notifications{tray};
+    Notifications notifications{tray};
     AppUpdater updater{menu};
-    AppPreferences preferences{config, notifications, updater, menu, [this] { slicer->showPage(forwardPage("/preferences")); }};
+    AppPreferences preferences{config, updater, menu, [this] { slicer->showPage(forwardPage("/preferences")); }};
     Account account{config, network};
     SetupServer setup{server, config, preferences, account, printerSettings, SlicerUrl};
     QAction *status;
@@ -300,6 +342,30 @@ private:
     std::shared_ptr<Job> active;
     std::unique_ptr<SlicerWindow> slicer;
     std::unique_ptr<DragWatcher> dragWatcher;
+    std::unique_ptr<GwaithRuns> gwaith;
+
+    // Starts a background Gwaith run, which works in the organization Forward is signed in to.
+    void startGwaith(const QStringList &files, const GwaithAutoSlice::Printer &printer, const QString &notes)
+    {
+        const auto paths = modelPaths(files);
+        const auto organization = account.organization();
+        if (paths.isEmpty()) return;
+        if (!account.signedIn() || organization.isEmpty()) {
+            slicer->showPage(forwardPage("/organization"));
+            return;
+        }
+        gwaith->start(organization.value("id").toInteger(), paths, printer, notes);
+    }
+
+    // Explorer's Send to Gwaith menu lists the organization's Forward printers while signed in.
+    void updateShellMenu()
+    {
+        QList<ShellMenu::Printer> printers;
+        if (account.signedIn() && !account.organization().isEmpty())
+            for (const auto &printer : printerSettings.entries())
+                if (!printer.id.isEmpty()) printers.append({printer.id, printer.name});
+        ShellMenu::update(printers);
+    }
 
     void updateOrganizationAction()
     {
@@ -343,7 +409,8 @@ private:
         }
     }
 
-    void startSend(const QJsonObject &body, const Reply &reply)
+    // progress, when given, receives the transfer's status in place of a plate notification.
+    void startSend(const QJsonObject &body, const Reply &reply, std::function<void(const QString &)> progress = {})
     {
         if (active) {
             reply(Status::Conflict, {{"error", "A transfer is already running."}});
@@ -359,9 +426,9 @@ private:
             job->connection = connection;
             job->downloadAuthorization = body.value("download_headers").toObject().value("Authorization").toString().toUtf8();
             job->sender = sender;
-            connect(sender, &PrinterSender::progress, this, [this](const QString &message) {
-                status->setText(message);
-            });
+            job->noticeTitle = "Sending to " + sender->name();
+            job->progress = std::move(progress);
+            connect(sender, &PrinterSender::progress, this, [this](const QString &message) { transferStatus(message); });
             connect(sender, &PrinterSender::completed, this, [this, job] {
                 job->doneMessage = "Print requested " + job->filename;
                 job->result = {{"ok", true}, {"print_requested", true}, {"filename", job->filename}, {"plate", 0}};
@@ -376,8 +443,6 @@ private:
             }
             active = job;
             printerSettings.setBusy(true);
-            if (preferences.notificationsEnabled())
-                notifications.send("Print request received", "Preparing Plate 1 for " + sender->name() + ".");
             download(job, url, [this, job] { sendPlate(job); });
         } catch (const std::exception &error) {
             reply(Status::BadRequest, {{"error", error.what()}});
@@ -403,6 +468,7 @@ private:
         auto job = std::make_shared<Job>(reply);
         job->downloadAuthorization = body.value("download_headers").toObject().value("Authorization").toString().toUtf8();
         job->drive = drives.first();
+        job->noticeTitle = "Saving to " + job->drive.displayName();
         if (!updater.beginTransfer()) {
             reply(Status::Conflict, {{"error", "Forward is restarting to install an update."}});
             return;
@@ -438,10 +504,60 @@ private:
         query->start();
     }
 
+    // The transfer's line in the menu and, with plate notifications on, its notification.
+    void transferStatus(const QString &message)
+    {
+        status->setText(message);
+        if (active && active->progress) active->progress(message);
+        else if (active && preferences.notificationsEnabled())
+            notifications.post({"plate", Notifications::Reason::PlateProgress, active->noticeTitle, message, Notifications::Indicator::Spinner});
+    }
+
+    // Sends a finished Gwaith run's plate to the printer its models were dropped on: the plate
+    // from Gwaith's attachment, and the printer's connection, which Forward keeps only for the
+    // send, from the main API.
+    void sendGwaithPlate(GwaithAutoSlice &run, std::function<void(const QString &)> progress,
+        std::function<void(const QString &)> done)
+    {
+        const auto printer = run.target();
+        const auto organization = run.organization();
+        progress("Downloading Gwaith’s plate…");
+        run.archiveDownload([this, printer, organization, progress, done](const QString &url, const QString &error) {
+            if (!error.isEmpty()) {
+                done(error);
+                return;
+            }
+            const auto path = QString("/api/v1/client/organizations/%1/slicer-printers/%2").arg(organization).arg(printer.id);
+            account.request("GET", path, {}, [this, url, printer, progress, done](int status, const QJsonDocument &body) {
+                if (status != 200) {
+                    done(QString("Couldn’t load %1’s connection (HTTP %2).").arg(printer.name).arg(status));
+                    return;
+                }
+                const auto connection = body.object().value("overrides").toObject().value("mirdain_connection").toObject();
+                if (connection.isEmpty()) {
+                    done(printer.name + " has no connection saved. Add it in the slicer’s Forward Printers.");
+                    return;
+                }
+                startSend({{"url", url}, {"connection", connection}, {"custom_printer_id", printer.id},
+                    {"custom_printer_name", printer.name}}, [done](Status status, const QJsonObject &result) {
+                    done(status == Status::Ok ? QString() : result.value("error").toString());
+                }, progress);
+            });
+        });
+    }
+
     void finish(std::shared_ptr<Job> job, const QString &error = {})
     {
         if (job->sender) job->sender->disconnect(this);
         const auto message = error.isEmpty() ? job->doneMessage : error;
+        // Plate notifications close themselves; the menu keeps the last status.
+        if (!job->progress && preferences.notificationsEnabled()) {
+            using Reason = Notifications::Reason;
+            const bool print = job->sender;
+            notifications.post({"plate", !error.isEmpty() ? Reason::PlateFailed : print ? Reason::PlateSent : Reason::PlateSavedToUsb,
+                !error.isEmpty() ? (print ? "Couldn’t send the plate" : "Couldn’t save to USB") : (print ? "Print requested" : "Saved to USB"),
+                message, error.isEmpty() ? Notifications::Indicator::Done : Notifications::Indicator::Failed, 0, PlateNotificationTimeout});
+        }
         status->setText(QFontMetrics(menu.font()).elidedText(message, Qt::ElideMiddle, 360));
         tray.setToolTip("Mirdain Forward - " + message);
         job->reply(error.isEmpty() ? Status::Ok : Status::BadGateway,
@@ -457,7 +573,7 @@ private:
             finish(job, job->archive.errorString());
             return;
         }
-        status->setText("Downloading…");
+        transferStatus("Downloading the plate…");
         QNetworkRequest request(url);
         request.setTransferTimeout(180000);
         if (!job->downloadAuthorization.isEmpty()) {
@@ -502,14 +618,14 @@ private:
         auto path = root.filePath(job->filename);
         for (int copy = 2; QFileInfo::exists(path); ++copy)
             path = root.filePath(QString("%1-%2.%3").arg(name.baseName()).arg(copy).arg(name.completeSuffix()));
-        status->setText("Saving to " + job->drive.displayName() + "…");
+        transferStatus("Saving to " + job->drive.displayName() + "…");
         if (!QFile::copy(job->archive.fileName(), path)) {
             finish(job, "Could not save to " + job->drive.displayName() + ". Check that the drive is writable and has free space.");
             return;
         }
         job->filename = QFileInfo(path).fileName();
         const auto driveName = job->drive.displayName();
-        status->setText("Ejecting " + driveName + "…");
+        transferStatus("Ejecting " + driveName + "…");
         // The file is saved either way; an eject failure is reported, not treated as a failed save.
         ejectDrive(job->drive, this, [this, job, path, driveName](const QString &ejectError) {
             job->doneMessage = "Saved " + job->filename + " to " + driveName
@@ -517,7 +633,6 @@ private:
             job->result = {{"ok", true}, {"filename", job->filename}, {"drive", driveName}, {"path", path},
                 {"ejected", ejectError.isEmpty()}};
             if (!ejectError.isEmpty()) job->result.insert("eject_error", ejectError);
-            if (preferences.notificationsEnabled()) notifications.send("Saved to USB", job->doneMessage);
             finish(job);
         });
     }
@@ -587,7 +702,9 @@ int main(int argc, char **argv)
                 request.setTransferTimeout(3000);
                 request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
                 const auto paths = QJsonArray::fromStringList(modelPaths(app.arguments().mid(1)));
-                auto *reply = network.post(request, QJsonDocument(QJsonObject{{"paths", paths}}).toJson(QJsonDocument::Compact));
+                QJsonObject body{{"paths", paths}};
+                if (const auto printer = gwaithPrinter(app.arguments()); !printer.isEmpty()) body.insert("gwaith_printer", printer);
+                auto *reply = network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
                 QObject::connect(reply, &QNetworkReply::finished, &app, &QApplication::quit);
                 return app.exec();
             }
@@ -599,9 +716,14 @@ int main(int argc, char **argv)
             return 1;
         }
         QTimer::singleShot(0, &forwarder, &Forwarder::start);
-        // Windows passes a model opened from Explorer on the command line.
+        // Windows passes a model opened from Explorer on the command line, after the printer when
+        // it came from the Send to Gwaith menu.
         const auto models = modelPaths(app.arguments().mid(1));
-        QTimer::singleShot(0, &forwarder, [&forwarder, models] { forwarder.openModels(models); });
+        const auto printer = gwaithPrinter(app.arguments());
+        QTimer::singleShot(0, &forwarder, [&forwarder, models, printer] {
+            if (printer.isEmpty()) forwarder.openModels(models);
+            else forwarder.sendToGwaith(models, printer);
+        });
         return app.exec();
     } catch (const std::exception &error) {
         QMessageBox::critical(nullptr, "Mirdain Forward", QString::fromUtf8(error.what()));

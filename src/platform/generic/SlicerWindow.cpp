@@ -11,6 +11,7 @@ void SlicerWindow::show() { openInSupportedBrowser(impl->url); }
 void SlicerWindow::load(const QUrl &) {}
 // The next show() opens the new page; the browser's open tabs stay as they are.
 void SlicerWindow::setSlicerUrl(const QUrl &slicer) { url = slicer; impl->url = slicer; }
+bool SlicerWindow::evaluate(const QString &) { return false; }
 // The slicer in a browser keeps its own session.
 void SlicerWindow::accountChanged() {}
 // The browser keeps whatever Forward opened; show() opens the slicer in a new tab.

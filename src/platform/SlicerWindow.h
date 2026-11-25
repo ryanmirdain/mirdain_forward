@@ -28,6 +28,10 @@ public:
     // Changes the slicer page, such as for another organization, and reloads the slicer if it
     // is showing.
     void setSlicerUrl(const QUrl &url);
+    // Opens a slicing session and its Gwaith chat in a new slicer tab: through the page's
+    // window.mirdainForwardOpenSession while the slicer shows, else by loading the slicer with
+    // them in its URL (?session=, &conversation=).
+    void openSession(const QString &sessionId, const QString &conversationId, qint64 organization);
     // Queues models opened from Finder or Explorer, shows the window, and dispatches
     // mirdainforwardopen in the page. The page calls the requestOpenedFiles bridge method once
     // it can import them and receives disk-backed Files: on macOS through its model file input,
@@ -55,6 +59,8 @@ public:
 private:
     void load(const QUrl &url);
     bool showingSlicer() const;
+    // Runs script in the page; false where the platform has no page to run it in.
+    bool evaluate(const QString &script);
 
     QUrl url;
     std::unique_ptr<Impl> impl;

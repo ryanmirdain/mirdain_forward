@@ -18,7 +18,7 @@
     <key>LSMinimumSystemVersion</key><string>${CMAKE_OSX_DEPLOYMENT_TARGET}</string>
     <key>LSUIElement</key><true/>
     <key>NSLocalNetworkUsageDescription</key><string>Send sliced plates to printers on your local network.</string>
-    <key>NSHighResolutionCapable</key><true/>
+    <key>NSHighResolutionCapable</key><true/>${FORWARD_DEV_TRANSPORT_SECURITY}
     <!-- Opening a model in Finder imports it into the slicer window. -->
     <key>CFBundleDocumentTypes</key>
     <array>

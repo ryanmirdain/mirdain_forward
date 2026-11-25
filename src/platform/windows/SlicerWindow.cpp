@@ -269,6 +269,13 @@ void SlicerWindow::setSlicerUrl(const QUrl &slicer)
     if (showingSlicer()) load(url);
 }
 
+bool SlicerWindow::evaluate(const QString &script)
+{
+    if (!impl->webview) return false;
+    impl->webview->ExecuteScript(wide(script).c_str(), nullptr);
+    return true;
+}
+
 void SlicerWindow::accountChanged()
 {
     if (impl->webview) impl->webview->ExecuteScript(L"window.dispatchEvent(new Event('mirdainforwardaccount'))", nullptr);

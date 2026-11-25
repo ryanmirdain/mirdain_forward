@@ -1,13 +1,11 @@
 #include "app/AppPreferences.h"
 #include "app/AppConfig.h"
 #include "platform/AppUpdater.h"
-#include "platform/NotificationSender.h"
 
 #include <QMenu>
 
-AppPreferences::AppPreferences(AppConfig &config, NotificationSender &notifications, AppUpdater &updater, QMenu &menu,
-    std::function<void()> openPage)
-    : config(config), notifications(notifications), updater(updater)
+AppPreferences::AppPreferences(AppConfig &config, AppUpdater &updater, QMenu &menu, std::function<void()> openPage)
+    : config(config), updater(updater)
 {
     menu.addAction("Preferences…", &menu, std::move(openPage));
 }
@@ -40,5 +38,4 @@ void AppPreferences::save(bool launchAtSignIn, bool notify, bool updates)
     preferences.insert("notifications_enabled", notify);
     config.setSection("preferences", preferences);
     if (updater.available()) updater.setAutomaticChecksEnabled(updates);
-    if (notify) notifications.requestPermission();
 }

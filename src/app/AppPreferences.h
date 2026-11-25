@@ -8,14 +8,13 @@
 
 class AppConfig;
 class AppUpdater;
-class NotificationSender;
 class QMenu;
 
 // Launch at sign-in, plate notifications, and automatic update checks. Forward's preferences
 // page sets them, first during onboarding and later from Preferences… in the menu.
 class AppPreferences {
 public:
-    AppPreferences(AppConfig &config, NotificationSender &notifications, AppUpdater &updater, QMenu &menu,
+    AppPreferences(AppConfig &config, AppUpdater &updater, QMenu &menu,
         std::function<void()> openPage);
     bool notificationsEnabled() const;
     // For the page: {saved, launchAtSignIn, launchSupported, launchNeedsApproval, notifications,
@@ -26,7 +25,6 @@ public:
 
 private:
     AppConfig &config;
-    NotificationSender &notifications;
     AppUpdater &updater;
     StartupRegistration startup;
 };

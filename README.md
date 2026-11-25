@@ -82,7 +82,7 @@ reopen event, and on other platforms the second instance posts `/show` to the ru
 one before exiting.
 
 `AppPreferences` owns the preferences that the preferences page reads and saves. `StartupRegistration`
-and `NotificationSender` provide platform-specific behavior behind shared class
+and `NotificationOverlay` provide platform-specific behavior behind shared class
 interfaces. `AppConfig` reads and atomically writes sections of the existing
 `printers.json`, preserving both printer settings and app preferences:
 
@@ -157,24 +157,60 @@ for CI variables, feed templates, signing, and publishing order.
 
 ## Notifications
 
-When notifications are enabled in Preferences, Forward sends one desktop
-notification when it accepts a **Send and print**
-request, before downloading the archive: **Print request received**, followed by
-the printer name. This confirms receipt, not that printing has started. Rejected
-requests do not notify, and progress, success, and failure do not send additional
-notifications.
+Everything goes through `Notifications::post` (`src/app/Notifications.h`). A
+notification has an ID (posting the same ID updates it in place), a reason, a title
+and body, an indicator (none, spinner, progress bar, done, or failed), a timeout in
+milliseconds or `-1` to stay until dismissed, and click and dismiss handlers.
 
-On macOS, saving Preferences with notifications enabled asks for notification
-permission. Receiving a plate never requests permission. If permission was
-denied, saving with notifications enabled explains how to enable it in **System
-Settings > Notifications > Mirdain Forward**. Forward requests banners without sound.
-Windows and Linux use Qt's system tray notifications and the desktop's existing
-notification settings. System settings or Focus mode may suppress notifications.
-Turning off notifications in Preferences suppresses delivery on every platform.
+On macOS, notifications appear in Forward's own card under the menu bar icon
+(`platform/macos/NotificationOverlay.mm`), with a notch pointing at the icon: one
+row per notification, its indicator, title, and body. A row's × dismisses it, and
+clicking it elsewhere activates it. Forward no longer uses macOS's notification
+center, so it never asks for notification permission.
 
-`NotificationSender` hides permission handling and platform delivery from the
-shared request handler. macOS uses UserNotifications through Objective-C++;
-other platforms use `QSystemTrayIcon::showMessage()`.
+Windows and Linux show `QSystemTrayIcon::showMessage()` notifications: title and
+body only, and only for reasons worth interrupting for there (a plate sent or saved
+to USB, a failed plate, a failed Gwaith run). Progress and finished Gwaith runs are
+omitted, since those notifications can't update in place or open a run.
+
+With plate notifications on in Preferences, each transfer is one notification: a
+spinner following the transfer's progress ("Downloading the plate…", the printer's
+own steps, saving and ejecting a USB drive), then **Print requested**, **Saved to
+USB**, or the failure. Plate notifications close themselves 8 seconds after the
+transfer ends; Gwaith runs stay until dismissed.
+
+## Gwaith auto-slice
+
+Models dropped on a printer in the drop panel (macOS) go to Gwaith, which slices them in
+the background (`src/gwaith/`). After the drop, the panel asks for optional notes for
+Gwaith (Return or **Slice** sends them, **Skip** sends none, and × or Esc cancels the
+drop). More models dropped on the notes card join the drop, which then reads "3 files". Each drop is a
+`GwaithAutoSlice`: it uploads the models to a new Gwaith conversation, asks Gwaith in
+plain text to slice them for that Forward printer with as few questions as possible and
+to export a `.mirdain` before finishing, adding the notes, and follows the conversation over Gwaith's socket (reconnecting and
+replaying the history if it drops). It reports Gwaith's current step, the slicing
+session Gwaith created (cleared again if Gwaith disconnects from it), and the
+last `.mirdain` Gwaith attached.
+
+`GwaithRuns` shows each run as a notification. When Gwaith finishes, it downloads that
+`.mirdain`, loads the printer's connection from the main API for this send only, and
+sends the plate like **Send and print**, with the transfer's progress in the run's row.
+With no `.mirdain` or no printer, the row shows **!** and says why, asking the user to
+open the run in the slicer while its session is still open. A run's row is clickable
+only while it has a session: clicking opens that session and its chat in the slicer.
+Before Gwaith creates one, or after it disconnects from it (ending it), the row shows no
+hover or hand cursor and ignores clicks. **Gwaith Activity…** in the menu shows dismissed runs again.
+`FORWARD_GWAITH_URL` (CMake) sets the Gwaith service; `./build.sh dev` uses
+`http://localhost:8001`.
+
+On Windows, right-clicking an `.stl` or `.3mf` in Explorer offers **Send to Gwaith**
+with one entry per Forward printer (on Windows 11, under **Show more options**).
+Forward writes that menu to `HKCU\Software\Classes` while signed in to an
+organization, rewriting it whenever its printers change, and removes it when signed
+out; the installer deletes it on uninstall (`platform/windows/ShellMenu.cpp`). An
+entry launches `mirdain_forward.exe --gwaith-printer <id> "<file>"`: a running
+Forward takes the file over through `/show`, and each selected file starts its own
+run, without the macOS notes step.
 
 ## Printer settings
 
@@ -241,7 +277,7 @@ assets/                 App icons and tray artwork
 ```
 
 CMake selects the platform implementations. Project headers use paths relative
-to `src/`, such as `platform/NotificationSender.h` and `printers/PrinterSender.h`.
+to `src/`, such as `platform/NotificationOverlay.h` and `printers/PrinterSender.h`.
 
 ## Adding printer protocols
 

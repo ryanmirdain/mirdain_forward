@@ -98,8 +98,8 @@ Write the release notes into each XML item's description or link them to a
 release-notes page. For Windows also use
 `sparkle:installerArguments="/SILENT /SP- /NOICONS"`. Templates in this directory
 are reference examples; replace all placeholders before publishing them.
-The XMLs live under `public/forward/updates/` on Aperture's deployed
-`codex/main-site-revamp` branch. Update and deploy that site separately after
+The XMLs live under `public/forward/updates/` on Aperture's deployed `main`
+branch. Update and deploy that site separately after
 the installers are published. Until the XML is updated, clients continue seeing
 the previous release. No cross-repository credentials are involved in releasing
 Forward anymore.

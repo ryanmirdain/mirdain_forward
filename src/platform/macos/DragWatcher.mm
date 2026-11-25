@@ -1,10 +1,10 @@
 #include "platform/DragWatcher.h"
+#include "platform/macos/MirdainStyle.h"
 
-#include <QFile>
+#include <QFileInfo>
 #include <QSystemTrayIcon>
 
 #import <AppKit/AppKit.h>
-#import <CoreText/CoreText.h>
 #import <QuartzCore/QuartzCore.h>
 
 static NSArray<NSURL *> *modelURLs(NSPasteboard *pasteboard)
@@ -21,30 +21,11 @@ static NSArray<NSURL *> *modelURLs(NSPasteboard *pasteboard)
 
 // MARK: Mirdain style
 
-// The colors of Forward's preferences dialog, which match mirdain_client.
-static NSColor *hex(uint32_t rgb, CGFloat alpha = 1)
-{
-    return [NSColor colorWithSRGBRed:((rgb >> 16) & 0xff) / 255.0 green:((rgb >> 8) & 0xff) / 255.0
-        blue:(rgb & 0xff) / 255.0 alpha:alpha];
-}
-static NSColor *Background() { return hex(0x0a0e11); }
-static NSColor *Surface() { return hex(0x111518); }
-static NSColor *Border() { return hex(0x3b4e57); }
-static NSColor *Text() { return hex(0xe7eef4); }
-static NSColor *Accent() { return hex(0xe967c8); }
-
-// Aileron from Forward's resources, without registering it for the whole process.
-static NSFont *aileron(bool semiBold, CGFloat size)
-{
-    static CTFontDescriptorRef descriptors[2] = {};
-    auto &descriptor = descriptors[semiBold];
-    if (!descriptor) {
-        QFile file(semiBold ? ":/assets/fonts/Aileron-SemiBold.otf" : ":/assets/fonts/Aileron-Regular.otf");
-        file.open(QIODevice::ReadOnly);
-        descriptor = CTFontManagerCreateFontDescriptorFromData((__bridge CFDataRef)file.readAll().toNSData());
-    }
-    return (__bridge_transfer NSFont *)CTFontCreateWithFontDescriptor(descriptor, size, nullptr);
-}
+static NSColor *Surface() { return mirdainSurface(); }
+static NSColor *Border() { return mirdainBorder(); }
+static NSColor *Text() { return mirdainText(); }
+static NSColor *Muted() { return mirdainMuted(); }
+static NSColor *Accent() { return mirdainAccent(); }
 
 // Draws one line, truncated to rect's width, in a flipped view.
 static void drawText(NSString *text, NSFont *font, NSColor *color, NSRect rect)
@@ -53,6 +34,17 @@ static void drawText(NSString *text, NSFont *font, NSColor *color, NSRect rect)
     style.lineBreakMode = NSLineBreakByTruncatingTail;
     [text drawWithRect:rect options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine
         attributes:@{NSFontAttributeName: font, NSForegroundColorAttributeName: color, NSParagraphStyleAttributeName: style}];
+}
+
+// A label for the card's header, wrapped to width.
+static NSTextField *headerLabel(NSString *text, NSFont *font, NSColor *color, CGFloat width)
+{
+    auto *label = [NSTextField wrappingLabelWithString:text];
+    label.font = font;
+    label.textColor = color;
+    label.preferredMaxLayoutWidth = width;
+    label.frame = NSMakeRect(0, 0, width, label.fittingSize.height);
+    return label;
 }
 
 // MARK: Views
@@ -84,7 +76,7 @@ static void drawText(NSString *text, NSFont *font, NSColor *color, NSRect rect)
 - (void)drawRect:(NSRect)dirtyRect
 {
     auto *box = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 0.5, 0.5) xRadius:3 yRadius:3];
-    [(_highlighted ? hex(0xe967c8, 0.12) : Surface()) setFill];
+    [(_highlighted ? mirdainColor(0xe967c8, 0.12) : Surface()) setFill];
     [box fill];
     [(_highlighted ? Accent() : Border()) setStroke];
     [box stroke];
@@ -112,22 +104,211 @@ static void drawText(NSString *text, NSFont *font, NSColor *color, NSRect rect)
 
 @end
 
-// Lays the printer boxes out from the card's top.
-@interface CardContent : NSView
+// The notes step after a drop: Return or Slice sends the notes, Skip sends none, and × or
+// Esc cancels the drop.
+@interface DropNotes : NSObject <NSTextFieldDelegate>
+@property (copy) void (^send)(NSString *notes);
+@property (copy) void (^cancel)(void);
+@property (weak) NSTextField *field;
 @end
 
-@implementation CardContent
+@implementation DropNotes
+
+- (void)submit:(id)sender { _send(_field.stringValue); }
+- (void)skip:(id)sender { _send(@""); }
+- (void)dismiss:(id)sender { _cancel(); }
+
+- (BOOL)control:(NSControl *)control textView:(NSTextView *)textView doCommandBySelector:(SEL)command
+{
+    if (command != @selector(cancelOperation:)) return NO;
+    _cancel();
+    return YES;
+}
+
+@end
+
+// Edits the notes field. Unlike the standard field editor it takes no drops, so models dragged
+// over the field fall through to the card instead of pasting their paths into the notes.
+@interface NotesEditor : NSTextView
+@end
+
+@implementation NotesEditor
+- (void)updateDragTypeRegistration { [self unregisterDraggedTypes]; }
+@end
+
+// Gives the notes field its own editor.
+@interface NotesPanelDelegate : NSObject <NSWindowDelegate>
+@end
+
+@implementation NotesPanelDelegate {
+    NotesEditor *_editor;
+}
+
+- (id)windowWillReturnFieldEditor:(NSWindow *)window toObject:(id)client
+{
+    if (![client isKindOfClass:NSTextField.class]) return nil;
+    if (!_editor) {
+        _editor = [[NotesEditor alloc] initWithFrame:NSZeroRect];
+        _editor.fieldEditor = YES;
+    }
+    return _editor;
+}
+
+@end
+
+// The notes card as a drop target: more models dropped on it join the drop. While models are
+// being dragged anywhere (armed), the notes fade out for a "drop to add" prompt with a dashed
+// outline, which brightens while the drag is over the card.
+@interface NotesDropZone : NSView
+@property (copy) void (^added)(NSArray<NSURL *> *urls);
+@property (strong) NSView *hint;
+- (void)setArmed:(BOOL)armed;
+@end
+
+@implementation NotesDropZone {
+    BOOL _highlighted;
+    BOOL _armed;
+}
+
+- (void)setArmed:(BOOL)armed
+{
+    if (armed == _armed) return;
+    _armed = armed;
+    self.needsDisplay = YES;
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+        context.duration = 0.16;
+        for (NSView *view in self.subviews) view.animator.alphaValue = (view == self.hint) == armed ? 1 : 0;
+    }];
+}
+
+- (instancetype)initWithFrame:(NSRect)frame
+{
+    self = [super initWithFrame:frame];
+    [self registerForDraggedTypes:@[NSPasteboardTypeFileURL]];
+    return self;
+}
 
 - (BOOL)isFlipped { return YES; }
 
+- (void)setHighlighted:(BOOL)highlighted
+{
+    _highlighted = highlighted;
+    self.needsDisplay = YES;
+}
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender
+{
+    if (!modelURLs(sender.draggingPasteboard).count) return NSDragOperationNone;
+    [self setHighlighted:YES];
+    return NSDragOperationCopy;
+}
+
+- (void)draggingExited:(id<NSDraggingInfo>)sender { [self setHighlighted:NO]; }
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender
+{
+    [self setHighlighted:NO];
+    NSArray<NSURL *> *urls = modelURLs(sender.draggingPasteboard);
+    if (!urls.count) return NO;
+    _added(urls);
+    return YES;
+}
+
+- (void)drawRect:(NSRect)dirtyRect
+{
+    if (!_highlighted && !_armed) return;
+    auto *outline = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 4.5, 4.5) xRadius:4 yRadius:4];
+    [mirdainColor(0xe967c8, _highlighted ? 0.12 : 0.04) setFill];
+    [outline fill];
+    const CGFloat dash[] = {4, 3};
+    [outline setLineDash:dash count:2 phase:0];
+    [mirdainColor(0xe967c8, _highlighted ? 1 : 0.55) setStroke];
+    [outline stroke];
+}
+
 @end
+
+// The notes field: Mirdain's dark fill and border, padded, with its line centered vertically.
+@interface NotesFieldCell : NSTextFieldCell
+@end
+
+@implementation NotesFieldCell
+
+- (NSRect)padded:(NSRect)rect
+{
+    const CGFloat line = [[[NSLayoutManager alloc] init] defaultLineHeightForFont:self.font];
+    return NSMakeRect(rect.origin.x + 9, rect.origin.y + (rect.size.height - line) / 2, rect.size.width - 18, line);
+}
+
+- (NSRect)drawingRectForBounds:(NSRect)rect { return [self padded:rect]; }
+
+- (void)editWithFrame:(NSRect)rect inView:(NSView *)view editor:(NSText *)editor delegate:(id)delegate event:(NSEvent *)event
+{
+    [super editWithFrame:[self padded:rect] inView:view editor:editor delegate:delegate event:event];
+}
+
+- (void)selectWithFrame:(NSRect)rect inView:(NSView *)view editor:(NSText *)editor delegate:(id)delegate
+    start:(NSInteger)start length:(NSInteger)length
+{
+    [super selectWithFrame:[self padded:rect] inView:view editor:editor delegate:delegate start:start length:length];
+}
+
+@end
+
+// Its border turns pink while it has the keyboard.
+@interface NotesField : NSTextField
+@end
+
+@implementation NotesField
+
++ (Class)cellClass { return NotesFieldCell.class; }
+
+// Dropped files belong to the card (NotesDropZone), not the text.
+- (instancetype)initWithFrame:(NSRect)frame
+{
+    self = [super initWithFrame:frame];
+    [self unregisterDraggedTypes];
+    return self;
+}
+
+- (BOOL)becomeFirstResponder
+{
+    const BOOL focused = [super becomeFirstResponder];
+    if (focused) {
+        self.layer.borderColor = Accent().CGColor;
+        // The field editor draws the caret.
+        if (auto *editor = (NSTextView *)[self currentEditor]) editor.insertionPointColor = Accent();
+    }
+    return focused;
+}
+
+- (void)textDidEndEditing:(NSNotification *)notification
+{
+    [super textDidEndEditing:notification];
+    self.layer.borderColor = Border().CGColor;
+}
+
+@end
+
+static NSButton *noteButton(NSString *title, bool primary, id target, SEL action)
+{
+    auto *button = [NSButton buttonWithTitle:title target:target action:action];
+    button.bordered = NO;
+    button.attributedTitle = [[NSAttributedString alloc] initWithString:title attributes:@{
+        NSFontAttributeName: aileron(true, 12), NSForegroundColorAttributeName: primary ? mirdainColor(0x010305) : Muted()}];
+    if (primary) {
+        button.wantsLayer = YES;
+        button.layer.backgroundColor = Accent().CGColor;
+        button.layer.cornerRadius = 4;
+    }
+    return button;
+}
 
 // MARK: Watcher
 
-static constexpr CGFloat CardWidth = 240, Radius = 6, Padding = 10, BoxHeight = 40, Gap = 8;
-// Room around the card for its shadow, which the card draws itself: the window's own shadow
-// follows the window's rectangle, not the rounded card.
-static constexpr CGFloat ShadowMargin = 24;
+static constexpr CGFloat CardWidth = 240, Padding = 10, BoxHeight = 40, Gap = 8;
+// The header's inset matches the printer names inside their boxes.
+static constexpr CGFloat HeaderInset = Padding + 4;
 // How far the card slides while it fades in and out.
 static constexpr CGFloat Slide = 8;
 
@@ -139,35 +320,45 @@ struct DragWatcher::Impl {
     id monitor = nil;
     NSTimer *poll = nil;
     bool shown = false;
+    // Asking for notes after a drop: the panel stays up through mouse-ups and ignores new drags.
+    bool prompting = false;
+    DropNotes *notes = nil;
+    // The drop being prepared: its models, which more drops on the notes card add to, and printer.
+    QStringList files;
+    Target fileTarget;
+    NSTextField *fileLine = nil;
+    NotesDropZone *zone = nil;
+    // The panel only keeps a weak reference to its delegate.
+    NotesPanelDelegate *panelDelegate = nil;
 
     NSView *layout(const QList<Target> &printers);
+    NSView *notesLayout();
+    QString fileText() const;
+    void addFiles(NSArray<NSURL *> *urls);
+    void prompt(const QStringList &paths, const Target &target);
     void show();
-    void hide();
+    // slide moves the card up as it fades; without it, it fades in place, as when it hands the
+    // drop to Gwaith's notification in the same spot.
+    void hide(bool slide = true);
 };
 
 NSView *DragWatcher::Impl::layout(const QList<Target> &printers)
 {
     const auto boxes = printers.isEmpty() ? QList<Target>{Target{}} : printers;
-    const CGFloat height = Padding + boxes.size() * BoxHeight + (boxes.size() - 1) * Gap + Padding;
-    auto *root = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, CardWidth + 2 * ShadowMargin, height + 2 * ShadowMargin)];
-    auto *card = [[NSView alloc] initWithFrame:NSMakeRect(ShadowMargin, ShadowMargin, CardWidth, height)];
-    card.wantsLayer = YES;
-    card.layer.backgroundColor = Background().CGColor;
-    card.layer.borderColor = Border().CGColor;
-    card.layer.borderWidth = 1;
-    card.layer.cornerRadius = Radius;
-    card.layer.shadowColor = NSColor.blackColor.CGColor;
-    card.layer.shadowOpacity = 0.55;
-    card.layer.shadowRadius = 14;
-    card.layer.shadowOffset = CGSizeMake(0, -6);
-    auto shadow = CGPathCreateWithRoundedRect(card.bounds, Radius, Radius, nullptr);
-    card.layer.shadowPath = shadow;
-    CGPathRelease(shadow);
-    [root addSubview:card];
-
-    auto *content = [[CardContent alloc] initWithFrame:card.bounds];
-    [card addSubview:content];
-    CGFloat y = Padding;
+    // The header says what a drop does: Gwaith slices the models and prints them.
+    const CGFloat textWidth = CardWidth - 2 * HeaderInset;
+    auto *title = headerLabel(@"Slice & Send", aileron(true, 14), Text(), textWidth);
+    auto *detail = headerLabel(@"Drop models on a printer. Gwaith slices them and starts the print.",
+        aileron(false, 12), Muted(), textWidth);
+    const CGFloat header = Padding + 2 + title.frame.size.height + 2 + detail.frame.size.height + 10;
+    const CGFloat height = header + boxes.size() * BoxHeight + (boxes.size() - 1) * Gap + Padding;
+    NSView *content;
+    auto *root = mirdainCard(NSMakeSize(CardWidth, height), &content);
+    [title setFrameOrigin:NSMakePoint(HeaderInset, Padding + 2)];
+    [detail setFrameOrigin:NSMakePoint(HeaderInset, NSMaxY(title.frame) + 2)];
+    [content addSubview:title];
+    [content addSubview:detail];
+    CGFloat y = header;
     // By value: the drop block keeps its own copy, since boxes is gone by the time of a drop.
     for (const Target target : boxes) {
         auto *box = [[PrinterBox alloc] initWithFrame:NSMakeRect(Padding, y, CardWidth - 2 * Padding, BoxHeight)];
@@ -175,8 +366,7 @@ NSView *DragWatcher::Impl::layout(const QList<Target> &printers)
         box.dropped = ^(NSArray<NSURL *> *urls) {
             QStringList paths;
             for (NSURL *url in urls) paths.append(QString::fromNSString(url.path));
-            hide();
-            dropped(paths, target);
+            prompt(paths, target);
         };
         [content addSubview:box];
         y += BoxHeight + Gap;
@@ -184,24 +374,139 @@ NSView *DragWatcher::Impl::layout(const QList<Target> &printers)
     return root;
 }
 
+// One model by name; more by count ("3 files"), with the printer.
+QString DragWatcher::Impl::fileText() const
+{
+    const auto models = files.size() == 1 ? QFileInfo(files.first()).fileName() : QString("%1 files").arg(files.size());
+    return fileTarget.name.isEmpty() ? models : models + " on " + fileTarget.name;
+}
+
+void DragWatcher::Impl::addFiles(NSArray<NSURL *> *urls)
+{
+    for (NSURL *url in urls) {
+        const auto path = QString::fromNSString(url.path);
+        if (!files.contains(path)) files.append(path);
+    }
+    fileLine.stringValue = fileText().toNSString();
+}
+
+NSView *DragWatcher::Impl::notesLayout()
+{
+    const CGFloat width = CardWidth - 2 * HeaderInset - 20, fieldHeight = 30, buttonHeight = 26;
+    auto *title = headerLabel(@"Add notes for Gwaith", aileron(true, 14), Text(), width);
+    auto *detail = headerLabel(fileText().toNSString(), aileron(false, 12), Muted(), width);
+    fileLine = detail;
+    auto *field = [[NotesField alloc] initWithFrame:NSZeroRect];
+    field.cell.scrollable = YES;
+    field.cell.usesSingleLineMode = YES;
+    field.cell.wraps = NO;
+    field.editable = YES;
+    field.bezeled = NO;
+    field.bordered = NO;
+    field.drawsBackground = YES;
+    field.backgroundColor = mirdainColor(0x010305);
+    field.textColor = Text();
+    field.font = aileron(false, 13);
+    field.placeholderAttributedString = [[NSAttributedString alloc] initWithString:@"e.g. PETG, add supports, 3 copies"
+        attributes:@{NSFontAttributeName: aileron(false, 13), NSForegroundColorAttributeName: mirdainColor(0x687985)}];
+    field.focusRingType = NSFocusRingTypeNone;
+    field.wantsLayer = YES;
+    field.layer.cornerRadius = 4;
+    field.layer.borderWidth = 1;
+    field.layer.borderColor = Border().CGColor;
+    field.delegate = notes;
+    field.target = notes;
+    field.action = @selector(submit:);
+    notes.field = field;
+    auto *skip = noteButton(@"Skip", false, notes, @selector(skip:));
+    auto *slice = noteButton(@"Slice", true, notes, @selector(submit:));
+
+    const CGFloat fieldTop = Padding + 2 + title.frame.size.height + 2 + detail.frame.size.height + 10;
+    const CGFloat buttonsTop = fieldTop + fieldHeight + 10;
+    NSView *content;
+    auto *root = mirdainCard(NSMakeSize(CardWidth, buttonsTop + buttonHeight + Padding), &content);
+    [title setFrameOrigin:NSMakePoint(HeaderInset, Padding + 2)];
+    [detail setFrameOrigin:NSMakePoint(HeaderInset, NSMaxY(title.frame) + 2)];
+    field.frame = NSMakeRect(Padding, fieldTop, CardWidth - 2 * Padding, fieldHeight);
+    slice.frame = NSMakeRect(CardWidth - Padding - 64, buttonsTop, 64, buttonHeight);
+    skip.frame = NSMakeRect(NSMinX(slice.frame) - 8 - 48, buttonsTop, 48, buttonHeight);
+    auto *close = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"xmark" accessibilityDescription:@"Cancel"]
+        target:notes action:@selector(dismiss:)];
+    close.bordered = NO;
+    close.contentTintColor = Muted();
+    close.toolTip = @"Cancel";
+    close.frame = NSMakeRect(CardWidth - Padding - 18, Padding, 18, 18);
+    // Everything sits in the drop zone, so models dropped anywhere on the card are taken.
+    zone = [[NotesDropZone alloc] initWithFrame:content.bounds];
+    zone.added = ^(NSArray<NSURL *> *urls) { addFiles(urls); };
+    [content addSubview:zone];
+    for (NSView *view in @[title, detail, field, skip, slice, close]) [zone addSubview:view];
+    auto *hint = headerLabel(@"Drop to add more models", aileron(true, 13), Text(), CardWidth - 2 * HeaderInset);
+    hint.alignment = NSTextAlignmentCenter;
+    [hint setFrameOrigin:NSMakePoint(HeaderInset, (content.bounds.size.height - hint.frame.size.height) / 2)];
+    hint.alphaValue = 0;
+    zone.hint = hint;
+    [zone addSubview:hint];
+    return root;
+}
+
+// Fades the printers out, grows the card down into the notes (its top stays under the icon), and
+// fades them in, focusing the field. Sending, with notes or skipped, closes the panel and passes
+// the drop on; cancelling closes it and drops nothing.
+void DragWatcher::Impl::prompt(const QStringList &droppedPaths, const Target &droppedTarget)
+{
+    // Kept on the watcher, not captured: blocks capture C++ references as bare addresses, and more
+    // models can join before sending.
+    files = droppedPaths;
+    fileTarget = droppedTarget;
+    prompting = true;
+    notes = [[DropNotes alloc] init];
+    notes.send = ^(NSString *text) {
+        if (!prompting) return;
+        prompting = false;
+        hide(false);
+        dropped(files, fileTarget, QString::fromNSString(text).trimmed());
+    };
+    notes.cancel = ^{
+        if (!prompting) return;
+        prompting = false;
+        hide();
+    };
+    NSView *old = mirdainCardContent(panel.contentView);
+    const auto from = old.frame.size;
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+        context.duration = 0.12;
+        context.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseIn];
+        old.animator.alphaValue = 0;
+    } completionHandler:^{
+        if (!prompting) return;
+        auto *root = notesLayout();
+        NSView *content = mirdainCardContent(root);
+        content.alphaValue = 0;
+        [panel setFrame:mirdainTrayPanelFrame(tray, root.frame.size) display:NO];
+        panel.contentView = root;
+        mirdainGrowCard(root, from, 0.22);
+        [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+            context.duration = 0.22;
+            context.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+            content.animator.alphaValue = 1;
+        }];
+        [panel makeKeyWindow];
+        [panel makeFirstResponder:notes.field];
+    }];
+}
+
 void DragWatcher::Impl::show()
 {
-    auto *content = layout(targets());
-    const auto size = content.frame.size;
-    // Qt reports the icon in top-left-origin coordinates of the primary screen; AppKit's are bottom-left.
-    const auto icon = tray.geometry();
-    const auto primary = NSScreen.screens.firstObject.frame;
-    NSPoint top;
-    if (icon.isValid()) {
-        top = NSMakePoint(icon.center().x(), NSMaxY(primary) - icon.bottom() - 6);
-    } else {
-        // The icon can be hidden behind the notch or a crowded menu bar.
-        const auto screen = NSScreen.mainScreen.visibleFrame;
-        top = NSMakePoint(NSMaxX(screen) - CardWidth / 2 - 12, NSMaxY(screen) - 6);
+    // A drag while asking for notes invites another drop instead.
+    if (prompting) {
+        [zone setArmed:YES];
+        return;
     }
-    const auto frame = NSMakeRect(top.x - size.width / 2, top.y + ShadowMargin - size.height, size.width, size.height);
+    auto *content = layout(targets());
+    const auto frame = mirdainTrayPanelFrame(tray, content.frame.size);
+    [panel setFrame:NSOffsetRect(frame, 0, Slide) display:NO];
     panel.contentView = content;
-    [panel setFrame:NSOffsetRect(frame, 0, Slide) display:YES];
     panel.alphaValue = 0;
     [panel orderFrontRegardless];
     shown = true;
@@ -213,7 +518,7 @@ void DragWatcher::Impl::show()
     }];
 }
 
-void DragWatcher::Impl::hide()
+void DragWatcher::Impl::hide(bool slide)
 {
     if (!shown) return;
     shown = false;
@@ -221,7 +526,7 @@ void DragWatcher::Impl::hide()
         context.duration = 0.14;
         context.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseIn];
         panel.animator.alphaValue = 0;
-        [panel.animator setFrame:NSOffsetRect(panel.frame, 0, Slide) display:YES];
+        if (slide) [panel.animator setFrame:NSOffsetRect(panel.frame, 0, Slide) display:YES];
     } completionHandler:^{
         // A drag that started during the fade shows the panel again.
         if (!shown) [panel orderOut:nil];
@@ -231,16 +536,9 @@ void DragWatcher::Impl::hide()
 DragWatcher::DragWatcher(QSystemTrayIcon &tray, Targets targets, Dropped dropped)
     : impl(new Impl{tray, std::move(targets), std::move(dropped)})
 {
-    auto *panel = [[NSPanel alloc] initWithContentRect:NSZeroRect
-        styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
-        backing:NSBackingStoreBuffered defer:YES];
-    panel.level = NSStatusWindowLevel;
-    panel.opaque = NO;
-    panel.backgroundColor = NSColor.clearColor;
-    panel.hasShadow = NO;
-    panel.hidesOnDeactivate = NO;
-    panel.releasedWhenClosed = NO;
-    panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
+    auto *panel = mirdainPanel(true);
+    impl->panelDelegate = [[NotesPanelDelegate alloc] init];
+    panel.delegate = impl->panelDelegate;
     impl->panel = panel;
 
     // A drag in another app writes the system drag pasteboard once it starts. Each mouse down
@@ -258,7 +556,10 @@ DragWatcher::DragWatcher(QSystemTrayIcon &tray, Targets targets, Dropped dropped
                 [timer invalidate];
                 // Let a drop on the panel finish before it closes.
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
-                    if (!(NSEvent.pressedMouseButtons & 1)) state->hide();
+                    if (NSEvent.pressedMouseButtons & 1) return;
+                    // The notes come back, now counting any models dropped on the card.
+                    if (state->prompting) [state->zone setArmed:NO];
+                    else state->hide();
                 });
                 return;
             }

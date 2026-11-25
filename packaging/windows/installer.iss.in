@@ -41,6 +41,10 @@ Root: HKCU; Subkey: "Software\Mirdain Systems\Mirdain Forward\Capabilities"; Val
 Root: HKCU; Subkey: "Software\Mirdain Systems\Mirdain Forward\Capabilities\FileAssociations"; ValueType: string; ValueName: ".stl"; ValueData: "MirdainForward.Model"
 Root: HKCU; Subkey: "Software\Mirdain Systems\Mirdain Forward\Capabilities\FileAssociations"; ValueType: string; ValueName: ".3mf"; ValueData: "MirdainForward.Model"
 Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "Mirdain Forward"; ValueData: "Software\Mirdain Systems\Mirdain Forward\Capabilities"; Flags: uninsdeletevalue
+; Explorer's Send to Gwaith menu for .stl and .3mf, which Forward writes from its printers (src/platform/windows/ShellMenu.cpp).
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.stl\shell\MirdainGwaith"; Flags: uninsdeletekey dontcreatekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.3mf\shell\MirdainGwaith"; Flags: uninsdeletekey dontcreatekey
+Root: HKCU; Subkey: "Software\Classes\MirdainForward.GwaithPrinters"; Flags: uninsdeletekey dontcreatekey
 
 [Run]
 Filename: "{app}\mirdain_forward.exe"; Description: "Launch Mirdain Forward"; Flags: nowait postinstall

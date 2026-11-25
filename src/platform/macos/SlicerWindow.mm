@@ -3,6 +3,7 @@
 #include <QJsonDocument>
 
 #import <AppKit/AppKit.h>
+#import <QuartzCore/QuartzCore.h>
 #import <WebKit/WebKit.h>
 
 @class SlicerController;
@@ -45,6 +46,8 @@ static constexpr CGFloat HeaderHeight = 51;
     bool _fileMenuEnabled;
     bool _libraryAvailable;
     bool _reportBugAvailable;
+    // The window's frame before full screen, which leaving full screen zooms back to.
+    NSRect _windowedFrame;
 }
 
 - (instancetype)initWithImpl:(SlicerWindow::Impl *)impl
@@ -159,6 +162,40 @@ static constexpr CGFloat HeaderHeight = 51;
 
 - (void)windowWillEnterFullScreen:(NSNotification *)notification { [self setFullScreen:true]; }
 
+// MARK: Full-screen zoom
+
+// The slicer window zooms into and out of full screen itself, so it animates even where the
+// system's own transition doesn't.
+static constexpr NSTimeInterval ZoomDuration = 0.4;
+
+- (NSArray<NSWindow *> *)customWindowsToEnterFullScreenForWindow:(NSWindow *)window { return @[window]; }
+- (NSArray<NSWindow *> *)customWindowsToExitFullScreenForWindow:(NSWindow *)window { return @[window]; }
+
+- (void)window:(NSWindow *)window startCustomAnimationToEnterFullScreenWithDuration:(NSTimeInterval)duration
+{
+    _windowedFrame = window.frame;
+    window.styleMask |= NSWindowStyleMaskFullScreen;
+    const auto target = window.screen.frame;
+    // The full-screen style resizes the window at once; it starts from where it was.
+    [window setFrame:_windowedFrame display:YES];
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+        context.duration = ZoomDuration;
+        context.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+        [window.animator setFrame:target display:YES];
+    }];
+}
+
+- (void)window:(NSWindow *)window startCustomAnimationToExitFullScreenWithDuration:(NSTimeInterval)duration
+{
+    window.styleMask &= ~NSWindowStyleMaskFullScreen;
+    const auto target = _windowedFrame;
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+        context.duration = ZoomDuration;
+        context.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+        [window.animator setFrame:target display:YES];
+    }];
+}
+
 - (void)windowDidExitFullScreen:(NSNotification *)notification
 {
     [self setFullScreen:false];
@@ -194,6 +231,13 @@ static constexpr CGFloat HeaderHeight = 51;
         self->_answering = nil;
         if (drop && ![drop[@"urls"] count]) [self->_gwaithDrops removeObject:drop];
     }];
+}
+
+- (bool)evaluate:(NSString *)script
+{
+    if (!_webView) return false;
+    [_webView evaluateJavaScript:script completionHandler:nil];
+    return true;
 }
 
 - (void)dispatchEvent:(NSString *)name
@@ -467,6 +511,8 @@ void SlicerWindow::setSlicerUrl(const QUrl &slicer)
 }
 
 void SlicerWindow::accountChanged() { [impl->controller dispatchEvent:@"mirdainforwardaccount"]; }
+
+bool SlicerWindow::evaluate(const QString &script) { return [impl->controller evaluate:script.toNSString()]; }
 
 void SlicerWindow::load(const QUrl &target) { [impl->controller load:target.toNSURL()]; }
 

@@ -30,13 +30,13 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/main.cpp
     src/app/AppConfig.h src/app/AppConfig.cpp
     src/app/AppPreferences.h src/app/AppPreferences.cpp
+    src/app/Notifications.h src/app/Notifications.cpp
     src/app/Account.h src/app/Account.cpp
     src/app/LocalAddress.h
     src/app/SetupServer.h src/app/SetupServer.cpp
     src/archive/ZipArchive.h src/archive/ZipArchive.cpp
     src/platform/StartupRegistration.h
     src/platform/SupportedBrowser.h
-    src/platform/NotificationSender.h
     src/platform/RemovableDrives.h
     src/printers/PrinterSettings.h src/printers/PrinterSettings.cpp
     src/printers/PrinterSendJob.h
@@ -50,6 +50,10 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/platform/SlicerWindow.h src/platform/SlicerWindow.cpp
     src/platform/ApplicationReopen.h
     src/platform/DragWatcher.h
+    src/platform/NotificationOverlay.h
+    src/platform/ShellMenu.h
+    src/gwaith/GwaithAutoSlice.h src/gwaith/GwaithAutoSlice.cpp
+    src/gwaith/GwaithRuns.h src/gwaith/GwaithRuns.cpp
 )
 qt_add_resources(mirdain_forward assets PREFIX "/" FILES
     assets/mirdain-mark.png
@@ -93,11 +97,25 @@ set_target_properties(mirdain_forward PROPERTIES
 )
 
 include(cmake/Updates.cmake)
+# Gwaith slices models dropped on the drop panel; override only for local test builds.
+set(FORWARD_GWAITH_URL "https://gwaith.mirdainsystems.com" CACHE STRING "Gwaith service that slices dropped models")
+# A local Gwaith (plain HTTP) stores uploads on a local S3 server at host.docker.internal, whose
+# plain-HTTP upload links App Transport Security would block in the slicer window. Only such
+# development builds allow them; release builds use HTTPS Gwaith and get no exception.
+set(FORWARD_DEV_TRANSPORT_SECURITY "")
+if(FORWARD_GWAITH_URL MATCHES "^http://")
+    set(FORWARD_DEV_TRANSPORT_SECURITY "
+    <key>NSAppTransportSecurity</key>
+    <dict><key>NSExceptionDomains</key><dict>
+        <key>host.docker.internal</key><dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+    </dict></dict>")
+endif()
 # Called with Forward's own session from its pages; override only for local test builds.
 set(FORWARD_API_URL "https://api.mirdainsystems.com" CACHE STRING "Mirdain API that Forward's pages use")
 # Loaded by Open Slicer; override only for local test builds, e.g. http://localhost:5173/.
 set(FORWARD_SLICER_URL "https://slicer.mirdainsystems.com/" CACHE STRING "Web slicer opened in the slicer window")
-target_compile_definitions(mirdain_forward PRIVATE FORWARD_API_URL="${FORWARD_API_URL}" FORWARD_SLICER_URL="${FORWARD_SLICER_URL}")
+target_compile_definitions(mirdain_forward PRIVATE FORWARD_API_URL="${FORWARD_API_URL}" FORWARD_SLICER_URL="${FORWARD_SLICER_URL}"
+    FORWARD_GWAITH_URL="${FORWARD_GWAITH_URL}")
 
 if(APPLE)
     set_target_properties(mirdain_forward PROPERTIES OUTPUT_NAME "Mirdain Forward")
@@ -105,31 +123,33 @@ if(APPLE)
     set_property(TARGET mirdain_forward APPEND PROPERTY BUILD_RPATH "@executable_path/../Frameworks")
     enable_language(OBJCXX)
     target_sources(mirdain_forward PRIVATE
-        src/platform/macos/NotificationSender.mm
         src/platform/macos/StartupRegistration.mm
         src/platform/macos/SupportedBrowser.mm
         src/platform/macos/RemovableDrives.cpp
         src/platform/macos/SlicerWindow.mm
         src/platform/macos/ApplicationReopen.mm
         src/platform/macos/DragWatcher.mm
+        src/platform/macos/NotificationOverlay.mm
+        src/platform/macos/MirdainStyle.h src/platform/macos/MirdainStyle.mm
+        src/platform/generic/ShellMenu.cpp
     )
     set_source_files_properties(
-        src/platform/macos/NotificationSender.mm
         src/platform/macos/StartupRegistration.mm
         src/platform/macos/SupportedBrowser.mm
         src/platform/macos/SlicerWindow.mm
         src/platform/macos/ApplicationReopen.mm
         src/platform/macos/DragWatcher.mm
+        src/platform/macos/NotificationOverlay.mm
+        src/platform/macos/MirdainStyle.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
     )
-    find_library(user_notifications UserNotifications REQUIRED)
     find_library(service_management ServiceManagement REQUIRED)
     find_library(appkit AppKit REQUIRED)
     find_library(disk_arbitration DiskArbitration REQUIRED)
     find_library(webkit WebKit REQUIRED)
     find_library(core_text CoreText REQUIRED)
     find_library(quartz_core QuartzCore REQUIRED)
-    target_link_libraries(mirdain_forward PRIVATE "${user_notifications}" "${service_management}" "${appkit}" "${disk_arbitration}" "${webkit}" "${core_text}" "${quartz_core}")
+    target_link_libraries(mirdain_forward PRIVATE "${service_management}" "${appkit}" "${disk_arbitration}" "${webkit}" "${core_text}" "${quartz_core}")
     target_sources(mirdain_forward PRIVATE assets/Icon.icns)
     set_source_files_properties(assets/Icon.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     target_sources(mirdain_forward PRIVATE packaging/OpenSSL-LICENSE.txt)
@@ -169,13 +189,14 @@ if(APPLE)
     )
 elseif(WIN32)
     target_sources(mirdain_forward PRIVATE
-        src/platform/windows/NotificationSender.cpp
         src/platform/windows/StartupRegistration.cpp
         src/platform/windows/RemovableDrives.cpp
         src/platform/generic/SupportedBrowser.cpp
         src/platform/windows/SlicerWindow.cpp
+        src/platform/windows/ShellMenu.cpp
         src/platform/generic/ApplicationReopen.cpp
         src/platform/generic/DragWatcher.cpp
+        src/platform/generic/NotificationOverlay.cpp
     )
     # WebView2 SDK headers and static loader; the runtime ships with Windows 10 and 11.
     FetchContent_Declare(webview2
@@ -194,13 +215,14 @@ elseif(WIN32)
     target_link_libraries(mirdain_forward PRIVATE "${webview2_SOURCE_DIR}/build/native/${webview2_arch}/WebView2LoaderStatic.lib" version)
 else()
     target_sources(mirdain_forward PRIVATE
-        src/platform/generic/NotificationSender.cpp
         src/platform/generic/StartupRegistration.cpp
         src/platform/generic/RemovableDrives.cpp
         src/platform/generic/SupportedBrowser.cpp
         src/platform/generic/SlicerWindow.cpp
         src/platform/generic/ApplicationReopen.cpp
         src/platform/generic/DragWatcher.cpp
+        src/platform/generic/NotificationOverlay.cpp
+        src/platform/generic/ShellMenu.cpp
     )
 endif()
 
