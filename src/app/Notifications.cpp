@@ -17,8 +17,8 @@ Notifications::Notifications(QSystemTrayIcon &tray)
 
 Notifications::~Notifications() = default;
 
-// Progress, and Gwaith finishing successfully, would only interrupt on Windows and Linux:
-// their notifications can't update in place or be clicked through to a run.
+// Progress, and Gwaith finishing successfully, would only interrupt on Linux:
+// its notifications can't update in place or be clicked through to a run.
 bool Notifications::showsAsSystemNotification(Reason reason)
 {
     switch (reason) {

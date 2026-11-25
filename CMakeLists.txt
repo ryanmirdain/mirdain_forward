@@ -197,7 +197,7 @@ elseif(WIN32)
         src/platform/windows/ShellMenu.cpp
         src/platform/generic/ApplicationReopen.cpp
         src/platform/generic/DragWatcher.cpp
-        src/platform/generic/NotificationOverlay.cpp
+        src/platform/windows/NotificationOverlay.cpp
     )
     # WebView2 SDK headers and static loader; the runtime ships with Windows 10 and 11.
     FetchContent_Declare(webview2

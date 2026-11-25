@@ -54,6 +54,10 @@ protected:
         const auto handled = QWidget::event(event);
         if (!controller) return handled;
         if (event->type() == QEvent::Resize || event->type() == QEvent::Show) fit();
+        // WebView2 does not follow its host's visibility. Without this, a window closed to the
+        // tray and shown again can stay blank white because the page never paints again.
+        if (event->type() == QEvent::Show || event->type() == QEvent::Hide || event->type() == QEvent::WindowStateChange)
+            controller->put_IsVisible(isVisible() && !isMinimized());
         // Popups such as <select> lists are positioned from the parent window.
         if (event->type() == QEvent::Move) controller->NotifyParentWindowPositionChanged();
         if (event->type() == QEvent::WindowActivate) controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);

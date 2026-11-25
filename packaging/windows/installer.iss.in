@@ -15,7 +15,13 @@ CloseApplications=no
 RestartApplications=no
 UninstallDisplayIcon={app}\mirdain_forward.exe
 SetupIconFile=@CMAKE_CURRENT_SOURCE_DIR@/assets/Icon.ico
-LicenseFile=@CMAKE_CURRENT_SOURCE_DIR@/LICENSE
+WizardStyle=modern
+WizardImageFile=@CMAKE_CURRENT_SOURCE_DIR@/assets/installer/wizard-100.bmp,@CMAKE_CURRENT_SOURCE_DIR@/assets/installer/wizard-150.bmp,@CMAKE_CURRENT_SOURCE_DIR@/assets/installer/wizard-200.bmp
+WizardSmallImageFile=@CMAKE_CURRENT_SOURCE_DIR@/assets/installer/wizard-small-100.bmp,@CMAKE_CURRENT_SOURCE_DIR@/assets/installer/wizard-small-150.bmp,@CMAKE_CURRENT_SOURCE_DIR@/assets/installer/wizard-small-200.bmp
+; Per-user install with a fixed location: go straight to progress, then the Finish page.
+DisableWelcomePage=yes
+DisableDirPage=yes
+DisableReadyPage=yes
 OutputDir=@CMAKE_CURRENT_SOURCE_DIR@/dist
 OutputBaseFilename=mirdain_forward-windows-x64-setup
 Compression=lzma2

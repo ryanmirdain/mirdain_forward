@@ -12,14 +12,13 @@
 class QSystemTrayIcon;
 class QTimer;
 
-// Forward's notifications. On macOS they appear in the card under the menu bar icon, with their
-// rich parts: an indicator (spinner, progress bar, check, warning), updates in place, clicks,
-// and dismissal. Elsewhere they are the system's tray notifications, title and body only, and
-// only for the reasons worth interrupting for there (see showsAsSystemNotification).
+// Forward's notifications. On macOS and Windows they appear in Forward's card by the tray icon,
+// with their rich parts: an indicator (spinner, progress bar, check, warning), updates in place,
+// clicks, and dismissal. On Linux they are the system's tray notifications, title and body only,
+// and only for the reasons worth interrupting for there (see showsAsSystemNotification).
 class Notifications : public QObject {
 public:
-    // Why a notification is shown, which decides whether the system notifications of Windows
-    // and Linux show it.
+    // Why a notification is shown, which decides whether Linux's system notifications show it.
     enum class Reason {
         PlateProgress,      // a plate is downloading or transferring
         PlateSent,          // the printer accepted the print request
@@ -43,9 +42,9 @@ public:
         double progress = 0;
         // Milliseconds until it dismisses itself, or -1 to stay until dismissed.
         int timeout = -1;
-        // Clicking it (macOS); without one, it isn't clickable.
+        // Clicking it (macOS and Windows); without one, it isn't clickable.
         std::function<void()> activated;
-        // Its × or its timeout (macOS); not called by remove.
+        // Its × or its timeout (macOS and Windows); not called by remove.
         std::function<void()> dismissed;
     };
 
