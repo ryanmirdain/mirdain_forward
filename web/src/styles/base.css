@@ -1,0 +1,33 @@
+/* Tokens, type and buttons from aperture/src/styles/site.css and typography.css. */
+@font-face { font-family: 'Aileron'; src: url('/fonts/Aileron-Regular.otf') format('opentype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Aileron'; src: url('/fonts/Aileron-SemiBold.otf') format('opentype'); font-weight: 500 700; font-display: swap; }
+:root {
+  color-scheme: dark;
+  --font-sans: 'Aileron', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --focus: var(--pink);
+  --ink: #010305;
+  --surface: #0a0e11;
+  --surface-raised: #172429;
+  --surface-2: var(--surface-raised);
+  --line: #29383f;
+  --line-strong: #3b4e57;
+  --text: #e7eef4;
+  --muted: #a8b7c5;
+  --ice: #b2cee3;
+  --blue: #5e98d7;
+  --pink: #e967c8;
+  --pink-hover: #f18bd8;
+}
+* { box-sizing: border-box; }
+html body[data-scroll-locked] { margin-right: 0 !important; }
+body { margin: 0; background: var(--ink); color: var(--text); font: 16px/1.6 var(--font-sans); -webkit-font-smoothing: antialiased; }
+input, textarea, select { font: inherit; color: var(--text); }
+button { font: inherit; }
+a { color: inherit; }
+strong { font-weight: 600; }
+.button { display: inline-flex; align-items: center; justify-content: center; gap: 12px; padding: 13px 22px; border: 0; border-radius: 3px; background: var(--pink); color: var(--ink); font-size: 15px; font-weight: 600; line-height: 1.4; text-decoration: none; cursor: pointer; transition: background .15s, transform .15s; }
+.button:hover { background: var(--pink-hover); transform: translateY(-1px); }
+.button:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.button:disabled { background: var(--surface-raised); color: var(--muted); box-shadow: inset 0 0 0 1px var(--line-strong); transform: none; cursor: default; }
+.button-secondary { background: transparent; color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.button-secondary:hover { background: var(--surface); box-shadow: inset 0 0 0 1px var(--muted); }

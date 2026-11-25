@@ -18,3 +18,9 @@ void SlicerWindow::completeSignIn(const QUrlQuery &callback)
     load(target);
     show();
 }
+
+void SlicerWindow::showSlicer()
+{
+    show();
+    if (!showingSlicer()) load(url);
+}

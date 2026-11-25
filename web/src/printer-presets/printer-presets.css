@@ -1,0 +1,59 @@
+.printer-catalog-dialog { width: min(780px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; overflow: hidden; border: 1px solid var(--strong); border-radius: 4px; background: var(--panel); color: #e7eef4; }
+.printer-catalog-dialog::backdrop { background: #0009; backdrop-filter: none; }
+.printer-catalog-dialog form { margin: 0; padding: 0; border: 0; }
+.printer-catalog-dialog p { margin: 0; }
+.printer-catalog-dialog .printer-picker-close { display: grid; flex-shrink: 0; place-items: center; width: 32px; height: 32px; margin-right: 6px; padding: 0; border: 0; background: transparent; color: var(--dim); font-size: 24px; line-height: 1; }
+.printer-catalog-dialog .printer-picker-close:hover:not(:disabled) { color: #e7eef4; }
+.printer-catalog-dialog .printer-picker-search-row { display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+.printer-catalog-dialog .printer-picker-search-row:focus-within { border-bottom-color: var(--accent); }
+.printer-catalog-dialog .printer-preset-search { display: block; flex: 1; width: 100%; min-width: 0; padding: 14px 12px; border: 0; border-radius: 0; background: transparent; color: #e7eef4; font: inherit; font-size: 13px; outline: none; }
+.printer-catalog-dialog .printer-preset-panels { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 2fr); height: min(52dvh, 460px); }
+.printer-catalog-dialog .printer-brand-panel, .printer-catalog-dialog .printer-model-panel, .printer-catalog-dialog .printer-model-options { display: flex; flex-direction: column; min-width: 0; min-height: 0; margin: 0; padding: 0; border: 0; }
+.printer-catalog-dialog .printer-model-options { flex: 1; }
+.printer-catalog-dialog .printer-brand-panel { border-right: 1px solid var(--line); }
+.printer-catalog-dialog .printer-preset-panels h3 { flex-shrink: 0; margin: 0; padding: 12px; color: var(--muted); font-size: 10px; font-weight: 700; line-height: 1.4; letter-spacing: .06em; }
+.printer-catalog-dialog .printer-brand-list, .printer-catalog-dialog .printer-preset-list { flex: 1; min-height: 0; overflow: auto; padding: 0 4px 4px; }
+.printer-catalog-dialog .printer-brand-list button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 9px 8px; border: 0; border-radius: 2px; background: transparent; color: var(--dim); text-align: left; font-size: 13px; }
+.printer-catalog-dialog .printer-brand-list button:hover:not(:disabled), .printer-catalog-dialog .printer-brand-list button[aria-pressed=true] { background: var(--raised); color: #e7eef4; }
+.printer-catalog-dialog .printer-brand-list button:focus-visible { outline-offset: -2px; }
+.printer-catalog-dialog .printer-brand-list button span { min-width: 0; overflow-wrap: anywhere; }
+.printer-catalog-dialog .printer-brand-list button small { margin-left: auto; color: var(--muted); font-size: 10px; }
+.printer-catalog-dialog .printer-model-group summary { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 9px 12px; border-radius: 3px; list-style: none; color: var(--dim); cursor: pointer; font-size: 13px; }
+.printer-catalog-dialog .printer-model-group summary::-webkit-details-marker { display: none; }
+.printer-catalog-dialog .printer-model-group summary:hover, .printer-catalog-dialog .printer-model-group[open] summary { background: var(--raised); color: #e7eef4; }
+.printer-catalog-dialog .printer-model-group summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.printer-catalog-dialog .printer-model-group summary > span:not(.printer-model-chevron) { min-width: 0; overflow-wrap: anywhere; }
+.printer-catalog-dialog .printer-model-group summary small { flex-shrink: 0; margin-left: auto; color: var(--muted); font-size: 10px; }
+.printer-catalog-dialog .printer-model-chevron { flex-shrink: 0; width: 6px; height: 6px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(-45deg); }
+.printer-catalog-dialog .printer-model-group[open] .printer-model-chevron { transform: translateY(-2px) rotate(45deg); }
+.printer-catalog-dialog .printer-nozzle-options { padding: 4px 0 8px 16px; }
+.printer-catalog-dialog .printer-preset-option { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 9px 12px; border: 1px solid transparent; border-radius: 3px; color: var(--dim); cursor: pointer; font-size: 13px; }
+.printer-catalog-dialog .printer-preset-option:hover, .printer-catalog-dialog .printer-preset-option.is-selected { background: var(--raised); color: #e7eef4; }
+.printer-catalog-dialog .printer-preset-option:focus-within { border-color: var(--accent); }
+.printer-catalog-dialog .printer-preset-checkbox { appearance: none; display: inline-grid; place-content: center; width: 18px; height: 18px; flex: none; margin: 0; border: 1px solid var(--strong); border-radius: 4px; background: var(--panel); cursor: pointer; vertical-align: middle; }
+.printer-catalog-dialog .printer-preset-checkbox::before { content: ''; width: 9px; height: 5px; border-bottom: 2px solid var(--ink); border-left: 2px solid var(--ink); transform: translateY(-1px) rotate(-45deg) scale(0); }
+.printer-catalog-dialog .printer-preset-checkbox:checked { border-color: var(--accent); background: var(--accent); }
+.printer-catalog-dialog .printer-preset-checkbox:checked::before { transform: translateY(-1px) rotate(-45deg); }
+.printer-catalog-dialog .printer-preset-checkbox:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.printer-catalog-dialog .printer-preset-checkbox:disabled { cursor: default; opacity: .5; }
+.printer-catalog-dialog .printer-preset-option span { min-width: 0; overflow-wrap: anywhere; }
+.printer-catalog-dialog .printer-preset-option small { margin-left: auto; color: var(--muted); font-size: 10px; }
+.printer-catalog-dialog .printer-preset-list p { padding: 12px; color: var(--muted); font-size: 13px; }
+.printer-catalog-dialog .printer-picker-error { flex-shrink: 0; max-height: 100px; overflow: auto; margin: 0; padding: 0 12px 12px; color: #f4a4a4; font-size: 13px; white-space: pre-wrap; }
+.printer-catalog-dialog footer { display: flex; flex-shrink: 0; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; padding: 12px; border-top: 1px solid var(--line); }
+.printer-catalog-dialog .printer-picker-selection { margin-right: auto; color: var(--muted); font-size: 12px; }
+.printer-catalog-dialog { margin: auto; z-index: 90; font-family: inherit; font-size: 14px; line-height: 1.4; box-shadow: 0 16px 48px #0008; --ink: var(--color-ink, #010305); --panel: var(--color-panel, #0a0e11); --raised: var(--color-panel-raised, #172429); --line: var(--color-line, #29383f); --strong: var(--color-line-strong, #3b4e57); --dim: var(--color-copy-dim, #9dacbc); --muted: var(--color-copy-muted, #687985); --accent: var(--color-accent, #e967c8); }
+.printer-catalog-dialog * { box-sizing: border-box; }
+.printer-catalog-dialog button, .printer-catalog-dialog input { font-family: inherit; }
+.printer-catalog-dialog button { cursor: pointer; }
+.printer-catalog-dialog button:disabled { cursor: default; opacity: .4; }
+.printer-catalog-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.printer-catalog-dialog .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px; padding: 8px 12px; border: 1px solid var(--strong); border-radius: 3px; font-size: 12px; font-weight: 600; line-height: 1.4; white-space: nowrap; transition: background .15s, border-color .15s; }
+.printer-catalog-dialog .button:hover { transform: none; }
+.printer-catalog-dialog .button-ghost { background: transparent; color: #e7eef4; }
+.printer-catalog-dialog .button-ghost:hover:not(:disabled) { background: var(--raised); }
+.printer-catalog-dialog .button-primary { background: var(--accent); border-color: var(--accent); color: var(--ink); }
+.printer-catalog-dialog .printer-preset-checkbox[type=radio] { border-radius: 50%; }
+.printer-catalog-dialog .printer-preset-checkbox[type=radio]::before { width: 8px; height: 8px; border: 0; border-radius: 50%; background: var(--ink); transform: scale(0); }
+.printer-catalog-dialog .printer-preset-checkbox[type=radio]:checked::before { transform: scale(1); }
+.printer-catalog-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

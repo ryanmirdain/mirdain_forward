@@ -6,3 +6,5 @@
 __pycache__/
 /.release-venv/
 /.release-tools/
+/web/node_modules/
+/web/dist/
