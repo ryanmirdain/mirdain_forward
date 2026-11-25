@@ -30,6 +30,9 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/main.cpp
     src/app/AppConfig.h src/app/AppConfig.cpp
     src/app/AppPreferences.h src/app/AppPreferences.cpp
+    src/app/Account.h src/app/Account.cpp
+    src/app/LocalAddress.h
+    src/app/SetupServer.h src/app/SetupServer.cpp
     src/archive/ZipArchive.h src/archive/ZipArchive.cpp
     src/platform/StartupRegistration.h
     src/platform/SupportedBrowser.h
@@ -43,14 +46,39 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/printers/PrusaBgcode.h src/printers/PrusaBgcode.cpp
     src/printers/BambuSender.h src/printers/BambuSender.cpp
     src/printers/BambuFtpsUpload.h src/printers/BambuFtpsUpload.cpp
+    src/printers/BambuFilaments.h src/printers/BambuFilaments.cpp
     src/platform/SlicerWindow.h src/platform/SlicerWindow.cpp
     src/platform/ApplicationReopen.h
+    src/platform/DragWatcher.h
 )
 qt_add_resources(mirdain_forward assets PREFIX "/" FILES
     assets/mirdain-mark.png
     assets/fonts/Aileron-Regular.otf
     assets/fonts/Aileron-SemiBold.otf
 )
+
+# Forward's own pages (onboarding, Add Printer): a React app in web/, built into one HTML file.
+find_program(npm NAMES npm.cmd npm REQUIRED)
+set(web_dir "${CMAKE_CURRENT_SOURCE_DIR}/web")
+set(web_output "${CMAKE_CURRENT_BINARY_DIR}/web/index.html")
+file(GLOB_RECURSE web_sources CONFIGURE_DEPENDS "${web_dir}/src/*")
+add_custom_command(OUTPUT "${web_dir}/node_modules/.package-lock.json"
+    COMMAND "${npm}" ci --no-audit --no-fund
+    WORKING_DIRECTORY "${web_dir}"
+    DEPENDS "${web_dir}/package-lock.json"
+    COMMENT "Installing web page dependencies"
+    VERBATIM
+)
+add_custom_command(OUTPUT "${web_output}"
+    COMMAND "${npm}" run build -- --outDir "${CMAKE_CURRENT_BINARY_DIR}/web" --emptyOutDir
+    WORKING_DIRECTORY "${web_dir}"
+    DEPENDS ${web_sources} "${web_dir}/index.html" "${web_dir}/vite.config.ts" "${web_dir}/tsconfig.json"
+        "${web_dir}/node_modules/.package-lock.json"
+    COMMENT "Building Forward's pages"
+    VERBATIM
+)
+set_source_files_properties("${web_output}" PROPERTIES GENERATED TRUE)
+qt_add_resources(mirdain_forward pages PREFIX "/web" BASE "${CMAKE_CURRENT_BINARY_DIR}/web" FILES "${web_output}")
 target_include_directories(mirdain_forward PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(mirdain_forward PRIVATE cxx_std_17)
 target_link_libraries(mirdain_forward PRIVATE Qt6::Widgets Qt6::Network Qt6::HttpServer Qt6::WebSockets Qt6::Mqtt Qt6::Concurrent miniz mirdain_bgcode OpenSSL::SSL)
@@ -65,11 +93,11 @@ set_target_properties(mirdain_forward PROPERTIES
 )
 
 include(cmake/Updates.cmake)
-# Opened from the first-launch dialog and Set Up Printer…; override only for local test builds.
-set(FORWARD_SETUP_URL "https://mirdainsystems.com/forward/" CACHE STRING "Forward page that hosts printer setup")
+# Called with Forward's own session from its pages; override only for local test builds.
+set(FORWARD_API_URL "https://api.mirdainsystems.com" CACHE STRING "Mirdain API that Forward's pages use")
 # Loaded by Open Slicer; override only for local test builds, e.g. http://localhost:5173/.
 set(FORWARD_SLICER_URL "https://slicer.mirdainsystems.com/" CACHE STRING "Web slicer opened in the slicer window")
-target_compile_definitions(mirdain_forward PRIVATE FORWARD_SETUP_URL="${FORWARD_SETUP_URL}" FORWARD_SLICER_URL="${FORWARD_SLICER_URL}")
+target_compile_definitions(mirdain_forward PRIVATE FORWARD_API_URL="${FORWARD_API_URL}" FORWARD_SLICER_URL="${FORWARD_SLICER_URL}")
 
 if(APPLE)
     set_target_properties(mirdain_forward PROPERTIES OUTPUT_NAME "Mirdain Forward")
@@ -80,18 +108,18 @@ if(APPLE)
         src/platform/macos/NotificationSender.mm
         src/platform/macos/StartupRegistration.mm
         src/platform/macos/SupportedBrowser.mm
-        src/platform/macos/WindowStyle.h src/platform/macos/WindowStyle.mm
         src/platform/macos/RemovableDrives.cpp
         src/platform/macos/SlicerWindow.mm
         src/platform/macos/ApplicationReopen.mm
+        src/platform/macos/DragWatcher.mm
     )
     set_source_files_properties(
         src/platform/macos/NotificationSender.mm
         src/platform/macos/StartupRegistration.mm
         src/platform/macos/SupportedBrowser.mm
-        src/platform/macos/WindowStyle.mm
         src/platform/macos/SlicerWindow.mm
         src/platform/macos/ApplicationReopen.mm
+        src/platform/macos/DragWatcher.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
     )
     find_library(user_notifications UserNotifications REQUIRED)
@@ -99,7 +127,9 @@ if(APPLE)
     find_library(appkit AppKit REQUIRED)
     find_library(disk_arbitration DiskArbitration REQUIRED)
     find_library(webkit WebKit REQUIRED)
-    target_link_libraries(mirdain_forward PRIVATE "${user_notifications}" "${service_management}" "${appkit}" "${disk_arbitration}" "${webkit}")
+    find_library(core_text CoreText REQUIRED)
+    find_library(quartz_core QuartzCore REQUIRED)
+    target_link_libraries(mirdain_forward PRIVATE "${user_notifications}" "${service_management}" "${appkit}" "${disk_arbitration}" "${webkit}" "${core_text}" "${quartz_core}")
     target_sources(mirdain_forward PRIVATE assets/Icon.icns)
     set_source_files_properties(assets/Icon.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     target_sources(mirdain_forward PRIVATE packaging/OpenSSL-LICENSE.txt)
@@ -145,6 +175,7 @@ elseif(WIN32)
         src/platform/generic/SupportedBrowser.cpp
         src/platform/windows/SlicerWindow.cpp
         src/platform/generic/ApplicationReopen.cpp
+        src/platform/generic/DragWatcher.cpp
     )
     # WebView2 SDK headers and static loader; the runtime ships with Windows 10 and 11.
     FetchContent_Declare(webview2
@@ -169,6 +200,7 @@ else()
         src/platform/generic/SupportedBrowser.cpp
         src/platform/generic/SlicerWindow.cpp
         src/platform/generic/ApplicationReopen.cpp
+        src/platform/generic/DragWatcher.cpp
     )
 endif()
 

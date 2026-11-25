@@ -1,11 +1,15 @@
+#include "app/Account.h"
 #include "app/AppConfig.h"
 #include "app/AppPreferences.h"
+#include "app/LocalAddress.h"
+#include "app/SetupServer.h"
+#include "platform/DragWatcher.h"
 #include "platform/NotificationSender.h"
 #include "platform/AppUpdater.h"
 #include "platform/ApplicationReopen.h"
 #include "platform/RemovableDrives.h"
 #include "platform/SlicerWindow.h"
-#include "platform/SupportedBrowser.h"
+#include "printers/BambuFilaments.h"
 #include "printers/PrinterSender.h"
 #include "printers/PrinterSettings.h"
 #include "archive/ZipArchive.h"
@@ -14,6 +18,7 @@
 #include <QBuffer>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QFileOpenEvent>
 #include <QFileInfo>
 #include <QFontMetrics>
 #include <QHttpServer>
@@ -46,9 +51,18 @@
 
 using Status = QHttpServerResponder::StatusCode;
 using Reply = std::function<void(Status, const QJsonObject &)>;
-constexpr quint16 Port = 18744;
-static const QUrl SetupUrl(FORWARD_SETUP_URL "#setup");
 static const QUrl SlicerUrl(FORWARD_SLICER_URL);
+constexpr bool DropPanelEnabled = false;
+
+// The slicer locked to Forward's organization: with organization set, and force_org not false,
+// it hides its organization picker. Unlocked until an organization is chosen.
+static QUrl slicerUrl(const QJsonObject &organization)
+{
+    if (organization.isEmpty()) return SlicerUrl;
+    auto url = SlicerUrl;
+    url.setQuery(QUrlQuery{{"organization", QString::number(organization.value("id").toInteger())}, {"force_org", "true"}});
+    return url;
+}
 
 static bool allowedOrigin(const QByteArray &origin)
 {
@@ -71,6 +85,18 @@ static QHttpServerResponse response(const QByteArray &origin, Status status, con
     }
     result.setHeaders(headers);
     return result;
+}
+
+// Models that Forward accepts from Finder, Explorer, or its command line, as absolute paths.
+static QStringList modelPaths(const QStringList &arguments)
+{
+    QStringList paths;
+    for (const auto &argument : arguments) {
+        const QFileInfo file(argument);
+        const auto suffix = file.suffix().toLower();
+        if (file.isFile() && (suffix == "stl" || suffix == "3mf")) paths.append(file.absoluteFilePath());
+    }
+    return paths;
 }
 
 static QJsonObject parseObject(const QByteArray &bytes)
@@ -146,53 +172,114 @@ public:
                 route(request, responder, [this](const QJsonObject &body, Reply reply) { startUsb(body, reply); });
             });
 
-        // Cognito's redirect for a sign-in started in the slicer window (see SlicerWindow::completeSignIn).
+        // Reads the printer's loaded spools. Independent of transfers, so it runs during one.
+        server.route("/filaments", QHttpServerRequest::Method::Post | QHttpServerRequest::Method::Options,
+            this, [this](const QHttpServerRequest &request, QHttpServerResponder &responder) {
+                route(request, responder, [this](const QJsonObject &body, Reply reply) { startFilaments(body, reply); });
+            });
+
+        // Cognito's redirect for a sign-in started by Forward's onboarding (see Account) or in the
+        // slicer window (see SlicerWindow::completeSignIn).
         server.route("/callback", QHttpServerRequest::Method::Get, this, [this](const QHttpServerRequest &request) {
-            slicer->completeSignIn(QUrlQuery(request.url()));
+            const QUrlQuery callback(request.url());
+            if (!account.completeSignIn(callback)) slicer->completeSignIn(callback);
             return QHttpServerResponse("text/html", "<!doctype html><meta charset=utf-8><title>Mirdain Forward</title>"
                 "<body style=\"font:16px system-ui;margin:4rem auto;max-width:32rem;text-align:center\">"
-                "<h1>Signed in</h1><p>Return to the Mirdain Slicer window. You can close this tab.</p>");
+                "<h1>Signed in</h1><p>Return to Mirdain Forward to continue. You can close this tab.</p>");
         });
 
         // The embedded slicer reaches the same handlers through a native bridge instead of HTTP.
-        slicer = std::make_unique<SlicerWindow>(SlicerUrl,
+        slicer = std::make_unique<SlicerWindow>(slicerUrl(account.organization()),
             [this](const QString &method, const QJsonObject &body, const SlicerWindow::Reply &bridgeReply) {
                 const Reply reply = [bridgeReply](Status status, const QJsonObject &result) {
                     bridgeReply(int(status), result);
                 };
                 if (method == "send") startSend(body, reply);
                 else if (method == "usb") startUsb(body, reply);
-                else reply(Status::NotFound, {{"error", "Unknown Forward method."}});
+                else if (method == "filaments") startFilaments(body, reply);
+                // The slicer in this window shares Forward's account: it asks for Forward's session
+                // instead of signing in itself.
+                else if (method == "session") account.session([this, reply](const QString &token, qint64 expiresAt) {
+                    if (token.isEmpty() && account.signedIn())
+                        reply(Status::BadGateway, {{"error", "Could not reach Mirdain. Check your internet connection."}});
+                    else reply(Status::Ok, {{"accessToken", token.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(token)},
+                        {"email", token.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(account.email())}, {"expiresAt", expiresAt}});
+                });
+                else if (method == "signIn") {
+                    // Forward finishes it in the browser and then sends mirdainforwardaccount.
+                    if (!account.signedIn()) account.beginSignIn();
+                    reply(Status::Ok, {});
+                } else if (method == "signOut") {
+                    account.signOut();
+                    reply(Status::Ok, {});
+                } else reply(Status::NotFound, {{"error", "Unknown Forward method."}});
             });
         const auto first = menu.actions().first();
         auto *openSlicer = new QAction("Open Slicer", &menu);
-        connect(openSlicer, &QAction::triggered, this, [this] { slicer->show(); });
+        connect(openSlicer, &QAction::triggered, this, [this] { slicer->showSlicer(); });
         menu.insertAction(first, openSlicer);
-        auto *setUpPrinter = new QAction("Set Up Printer…", &menu);
-        connect(setUpPrinter, &QAction::triggered, this, [] { openInSupportedBrowser(SetupUrl); });
-        menu.insertAction(first, setUpPrinter);
+        auto *addPrinter = new QAction("Add Printer…", &menu);
+        connect(addPrinter, &QAction::triggered, this, [this] { slicer->showPage(forwardPage("/add-printer")); });
+        menu.insertAction(first, addPrinter);
+        organizationAction = new QAction(&menu);
+        connect(organizationAction, &QAction::triggered, this, [this] { slicer->showPage(forwardPage("/organization")); });
+        menu.insertAction(first, organizationAction);
         menu.insertSeparator(first);
+        updateOrganizationAction();
+        setup.organizationChanged = [this] {
+            updateOrganizationAction();
+            slicer->setSlicerUrl(slicerUrl(account.organization()));
+        };
+        // Signing in happens in the browser; come back to the window after it. The slicer in the
+        // window shares the account, so it reloads its session either way.
+        account.changed = [this] {
+            slicer->accountChanged();
+            // Signing out forgets the organization, which unlocks the slicer's.
+            slicer->setSlicerUrl(slicerUrl(account.organization()));
+            if (account.signedIn()) slicer->show();
+        };
+        // Models dropped on the panel that appears under the tray icon during a drag go to Gwaith.
+        // Disabled for now; the panel still builds so it can be turned back on here.
+        if (DropPanelEnabled) dragWatcher = std::make_unique<DragWatcher>(tray, [this] {
+            QList<DragWatcher::Target> targets;
+            for (const auto &printer : printerSettings.entries()) targets.append({printer.id, printer.name});
+            return targets;
+        }, [this](const QStringList &paths, const DragWatcher::Target &target) {
+            slicer->sendToGwaith(modelPaths(paths), {{"id", target.printerId}, {"name", target.name}});
+        });
 
         // Launching Forward again while it runs opens the slicer window: a second instance
-        // posts /show before exiting, and macOS sends the running app a reopen event instead.
+        // posts /show, with any model paths it was given, before exiting. macOS instead sends
+        // the running app a reopen event, or a file open event for models.
         server.route("/show", QHttpServerRequest::Method::Post, this, [this](const QHttpServerRequest &request) {
             if (request.headers().contains("Origin"))
                 return QHttpServerResponse(Status::Forbidden);
-            slicer->show();
+            QStringList paths;
+            if (!request.body().isEmpty())
+                for (const auto &path : parseObject(request.body()).value("paths").toArray()) paths.append(path.toString());
+            if (paths.isEmpty()) slicer->show();
+            else slicer->openFiles(modelPaths(paths));
             return QHttpServerResponse(Status::NoContent);
         });
+        qApp->installEventFilter(this);
     }
+
+    void openModels(const QStringList &paths) { slicer->openFiles(paths); }
 
     bool listen()
     {
         auto *listener = new QTcpServer(&server);
-        return listener->listen(QHostAddress::LocalHost, Port) && server.bind(listener);
+        return listener->listen(QHostAddress::LocalHost, ForwardPort) && server.bind(listener);
     }
 
-    void promptOnFirstLaunch()
+    // Forward is already listening, so its pages load right away.
+    void start()
     {
-        // Forward is already listening, so the page can Verify it right away.
-        if (preferences.promptOnFirstLaunch()) openInSupportedBrowser(SetupUrl);
+        if (setup.onboardingComplete()) slicer->showSlicer();
+        else slicer->showPage(forwardPage());
+        // Keep the menu's printers in step with printers added elsewhere, such as in the slicer.
+        const auto organization = account.organization();
+        if (account.signedIn() && !organization.isEmpty()) setup.switchOrganization(organization, [](const QString &) {});
         updater.start();
         // Installed once the app has finished launching, so AppKit's own handler doesn't replace it.
         onApplicationReopen([this] { slicer->show(); });
@@ -207,10 +294,29 @@ private:
     QSystemTrayIcon tray;
     NotificationSender notifications{tray};
     AppUpdater updater{menu};
-    AppPreferences preferences{config, notifications, updater, menu};
+    AppPreferences preferences{config, notifications, updater, menu, [this] { slicer->showPage(forwardPage("/preferences")); }};
+    Account account{config, network};
+    SetupServer setup{server, config, preferences, account, printerSettings, SlicerUrl};
     QAction *status;
+    QAction *organizationAction;
     std::shared_ptr<Job> active;
     std::unique_ptr<SlicerWindow> slicer;
+    std::unique_ptr<DragWatcher> dragWatcher;
+
+    void updateOrganizationAction()
+    {
+        const auto name = account.organization().value("name").toString();
+        organizationAction->setText(name.isEmpty() ? "Choose Organization…" : "Organization: " + name + "…");
+    }
+
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (watched == qApp && event->type() == QEvent::FileOpen) {
+            openModels(modelPaths({static_cast<QFileOpenEvent *>(event)->file()}));
+            return true;
+        }
+        return QObject::eventFilter(watched, event);
+    }
 
     void route(const QHttpServerRequest &request, QHttpServerResponder &responder,
         const std::function<void(const QJsonObject &, Reply)> &start)
@@ -306,6 +412,32 @@ private:
         active = job;
         printerSettings.setBusy(true);
         download(job, url, [this, job] { saveToDrive(job); });
+    }
+
+    void startFilaments(const QJsonObject &body, const Reply &reply)
+    {
+        const auto connection = body.value("connection").toObject();
+        if (connection.value("protocol").toString() != "bambu_lan") {
+            reply(Status::BadRequest, {{"error", "Loaded filaments can only be read from Bambu LAN printers."},
+                {"code", "unsupported"}});
+            return;
+        }
+        BambuFilaments *query;
+        try {
+            query = new BambuFilaments(connection, body.value("printer_model").toString());
+        } catch (const std::exception &error) {
+            reply(Status::BadRequest, {{"error", error.what()}});
+            return;
+        }
+        connect(query, &BambuFilaments::completed, this, [query, reply](const QJsonArray &units) {
+            reply(Status::Ok, {{"ok", true}, {"filaments", units}});
+            query->deleteLater();
+        });
+        connect(query, &BambuFilaments::failed, this, [query, reply](const QString &error) {
+            reply(Status::BadGateway, {{"error", error}});
+            query->deleteLater();
+        });
+        query->start();
     }
 
     void finish(std::shared_ptr<Job> job, const QString &error = {})
@@ -451,11 +583,13 @@ int main(int argc, char **argv)
         lock.setStaleLockTime(0);
         if (!lock.tryLock(0)) {
             if (lock.error() == QLockFile::LockFailedError) {
-                // Forward is already running: ask it to open the slicer window.
+                // Forward is already running: ask it to open the slicer window and any models.
                 QNetworkAccessManager network;
-                QNetworkRequest request(QUrl(QString("http://127.0.0.1:%1/show").arg(Port)));
+                QNetworkRequest request(QUrl(QString("http://127.0.0.1:%1/show").arg(ForwardPort)));
                 request.setTransferTimeout(3000);
-                auto *reply = network.post(request, QByteArray());
+                request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+                const auto paths = QJsonArray::fromStringList(modelPaths(app.arguments().mid(1)));
+                auto *reply = network.post(request, QJsonDocument(QJsonObject{{"paths", paths}}).toJson(QJsonDocument::Compact));
                 QObject::connect(reply, &QNetworkReply::finished, &app, &QApplication::quit);
                 return app.exec();
             }
@@ -466,7 +600,10 @@ int main(int argc, char **argv)
             QMessageBox::critical(nullptr, "Mirdain Forward", "Cannot listen on 127.0.0.1:18744. Is Mirdain Forward already running?");
             return 1;
         }
-        QTimer::singleShot(0, &forwarder, &Forwarder::promptOnFirstLaunch);
+        QTimer::singleShot(0, &forwarder, &Forwarder::start);
+        // Windows passes a model opened from Explorer on the command line.
+        const auto models = modelPaths(app.arguments().mid(1));
+        QTimer::singleShot(0, &forwarder, [&forwarder, models] { forwarder.openModels(models); });
         return app.exec();
     } catch (const std::exception &error) {
         QMessageBox::critical(nullptr, "Mirdain Forward", QString::fromUtf8(error.what()));

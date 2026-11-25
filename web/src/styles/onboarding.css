@@ -1,0 +1,80 @@
+/* The header stands in for the window's title bar: 51px, like the slicer's, so macOS can
+   center its traffic lights in it. */
+.title-bar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; height: 51px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--ink); user-select: none; -webkit-user-select: none; }
+.title-bar-left { padding-left: 86px; }
+.title-bar-right { padding-right: 0; app-region: drag; -webkit-app-region: drag; }
+.title-bar-name { color: var(--muted); font-size: 13px; font-weight: 600; letter-spacing: .01em; pointer-events: none; }
+.title-bar-controls { display: flex; height: 100%; margin-left: auto; app-region: no-drag; -webkit-app-region: no-drag; }
+.title-bar-controls button { display: grid; place-items: center; width: 46px; height: 100%; padding: 0; border: 0; background: transparent; color: var(--text); cursor: default; }
+.title-bar-controls button:hover { background: var(--surface-raised); }
+.title-bar-controls .title-bar-close:hover { background: #c42b1c; }
+.title-bar-controls svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1; }
+
+/* The progress and step are centered as one column. When a step changes the column's height,
+   the view transition below glides both to their new place instead of snapping. */
+.onboarding-main { display: grid; place-items: center; min-height: calc(100vh - 51px); padding: clamp(40px, 8vh, 96px) 48px; }
+.onboarding-column { width: 100%; max-width: 620px; }
+.onboarding-progress-slot { height: 25px; margin-bottom: 28px; }
+.forward-steps.onboarding-progress { grid-template-columns: repeat(2, 1fr); margin: 0; }
+.onboarding-loading { color: var(--muted); text-align: center; }
+@media (max-width: 600px) { .onboarding-main { padding-inline: 24px; } }
+
+.onboarding-toggles { margin-top: 28px; border-block: 1px solid var(--line); }
+.onboarding-toggle { display: flex; align-items: flex-start; gap: 24px; padding: 20px 0; }
+.onboarding-toggle + .onboarding-toggle { border-top: 1px solid var(--line); }
+.onboarding-toggle > div { flex: 1; }
+.onboarding-toggle label { font-size: 15px; font-weight: 600; }
+.forward-step-content .onboarding-toggle p { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.forward-step-content .onboarding-toggle .onboarding-note { margin-top: 10px; color: #f2b48a; }
+/* The switch from Forward's former Qt preferences dialog. */
+.switch { appearance: none; position: relative; flex: none; width: 40px; height: 24px; margin: 0; border: 1px solid var(--line-strong); border-radius: 12px; background: #172429; cursor: pointer; transition: background .15s; }
+.switch::before { content: ''; position: absolute; top: 4px; left: 4px; width: 14px; height: 14px; border-radius: 50%; background: var(--text); transition: transform .15s, background .15s; }
+.switch:checked { background: var(--text); }
+.switch:checked::before { background: var(--ink); transform: translateX(16px); }
+.switch:focus-visible { outline: 2px solid var(--pink); outline-offset: 3px; }
+.switch:disabled { opacity: .4; cursor: default; }
+
+.onboarding-close { display: grid; place-items: center; width: 36px; height: 36px; margin-left: auto; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; }
+.onboarding-close:hover { background: var(--surface-raised); color: var(--text); }
+.onboarding-close:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+.onboarding-close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+.forward-step-actions .onboarding-saved { margin: 0; color: var(--muted); font-size: 14px; }
+
+.onboarding-waiting { display: flex; align-items: center; gap: 12px; }
+.onboarding-spinner { flex: none; width: 18px; height: 18px; border: 2px solid var(--line-strong); border-top-color: var(--pink); border-radius: 50%; animation: onboarding-spin .8s linear infinite; }
+@keyframes onboarding-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .onboarding-spinner { animation-duration: 3s; } }
+
+.onboarding-choices { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.forward-complete .onboarding-choices { justify-content: center; }
+.onboarding-choices .button { min-height: 48px; }
+
+/* Step change, copied from aperture/src/styles/order.css: the old step slides out and the new
+   one slides in from the side it is heading. */
+.onboarding-step { view-transition-name: onboarding-step; }
+.onboarding-progress { view-transition-name: onboarding-progress; }
+::view-transition-old(onboarding-step) { animation: onboarding-step-out .28s cubic-bezier(.4, 0, 1, 1) both; }
+::view-transition-new(onboarding-step) { animation: onboarding-step-in .42s cubic-bezier(.2, .8, .2, 1) .08s both; }
+:root[data-step="back"]::view-transition-old(onboarding-step) { animation-name: onboarding-step-out-back; }
+:root[data-step="back"]::view-transition-new(onboarding-step) { animation-name: onboarding-step-in-back; }
+/* The group carries each snapshot from its old box to its new one: the browser measures both
+   steps, so a taller or shorter step moves the content smoothly rather than jumping. The
+   images stay top-aligned in the group, so the outgoing step rides along without resizing. */
+::view-transition-group(onboarding-step), ::view-transition-group(onboarding-progress) {
+  animation-duration: .42s; animation-timing-function: cubic-bezier(.2, .8, .2, 1);
+}
+@keyframes onboarding-step-out { to { opacity: 0; transform: translateX(-32px); } }
+@keyframes onboarding-step-in { from { opacity: 0; transform: translateX(32px); } }
+@keyframes onboarding-step-out-back { to { opacity: 0; transform: translateX(32px); } }
+@keyframes onboarding-step-in-back { from { opacity: 0; transform: translateX(-32px); } }
+
+/* The progress, outside the step, moves by one bubble when its pair changes: the bubble that
+   was on the right lands on the left. Otherwise it cross-fades (the default). */
+:root[data-progress="shift"]::view-transition-old(onboarding-progress) { animation: onboarding-progress-out .4s cubic-bezier(.4, 0, .2, 1) both; }
+:root[data-progress="shift"]::view-transition-new(onboarding-progress) { animation: onboarding-progress-in .4s cubic-bezier(.4, 0, .2, 1) both; }
+:root[data-progress="shift"][data-step="back"]::view-transition-old(onboarding-progress) { animation-name: onboarding-progress-out-back; }
+:root[data-progress="shift"][data-step="back"]::view-transition-new(onboarding-progress) { animation-name: onboarding-progress-in-back; }
+@keyframes onboarding-progress-out { to { opacity: 0; transform: translateX(-50%); } }
+@keyframes onboarding-progress-in { from { opacity: 0; transform: translateX(50%); } }
+@keyframes onboarding-progress-out-back { to { opacity: 0; transform: translateX(50%); } }
+@keyframes onboarding-progress-in-back { from { opacity: 0; transform: translateX(-50%); } }

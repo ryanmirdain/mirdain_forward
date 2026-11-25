@@ -20,6 +20,7 @@ OutputDir=@CMAKE_CURRENT_SOURCE_DIR@/dist
 OutputBaseFilename=mirdain_forward-windows-x64-setup
 Compression=lzma2
 SolidCompression=yes
+ChangesAssociations=yes
 
 [Files]
 Source: "@CMAKE_CURRENT_BINARY_DIR@/Release/*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -29,6 +30,17 @@ Name: "{group}\Mirdain Forward"; Filename: "{app}\mirdain_forward.exe"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Mirdain Systems\Mirdain Forward"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletevalue uninsdeletekeyifempty
+; Lists Forward under Open with for .stl and .3mf and in Default Apps. Windows leaves choosing the default to the user.
+Root: HKCU; Subkey: "Software\Classes\MirdainForward.Model"; ValueType: string; ValueName: ""; ValueData: "3D Model"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\MirdainForward.Model\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\mirdain_forward.exe,0"
+Root: HKCU; Subkey: "Software\Classes\MirdainForward.Model\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\mirdain_forward.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\.stl\OpenWithProgids"; ValueType: string; ValueName: "MirdainForward.Model"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\.3mf\OpenWithProgids"; ValueType: string; ValueName: "MirdainForward.Model"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Mirdain Systems\Mirdain Forward\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "Mirdain Forward"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Mirdain Systems\Mirdain Forward\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Slice 3D models and send them to your printer."
+Root: HKCU; Subkey: "Software\Mirdain Systems\Mirdain Forward\Capabilities\FileAssociations"; ValueType: string; ValueName: ".stl"; ValueData: "MirdainForward.Model"
+Root: HKCU; Subkey: "Software\Mirdain Systems\Mirdain Forward\Capabilities\FileAssociations"; ValueType: string; ValueName: ".3mf"; ValueData: "MirdainForward.Model"
+Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "Mirdain Forward"; ValueData: "Software\Mirdain Systems\Mirdain Forward\Capabilities"; Flags: uninsdeletevalue
 
 [Run]
 Filename: "{app}\mirdain_forward.exe"; Description: "Launch Mirdain Forward"; Flags: nowait postinstall

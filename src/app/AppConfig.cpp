@@ -21,7 +21,7 @@ AppConfig::AppConfig()
     if (error.error != QJsonParseError::NoError || !document.isObject())
         throw std::runtime_error(("Invalid app settings: " + path).toStdString());
     data = document.object();
-    for (const auto &name : {QStringLiteral("printers"), QStringLiteral("preferences")})
+    for (const auto &name : {QStringLiteral("printers"), QStringLiteral("preferences"), QStringLiteral("account")})
         if (data.contains(name) && !data.value(name).isObject())
             throw std::runtime_error(("Invalid settings section: " + name).toStdString());
 }

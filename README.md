@@ -5,11 +5,14 @@ Third-party components retain their respective licenses.
 
 Minimal Qt C++ menu bar / system tray app. It listens on **127.0.0.1:18744**,
 downloads a `.mirdain` archive, and sends the selected slice's **plate 0** to an
-ELEGOO, PrusaLink, or Bambu LAN printer, then requests printing. No account or
-queue. Printer names, IDs, and settings are saved locally; printer credentials
-arrive in each request.
+ELEGOO, PrusaLink, or Bambu LAN printer, then requests printing. No queue.
+Printer names, IDs, and settings are saved locally; printer credentials arrive in
+each request.
 
-The menu starts with Open Slicer and Set Up Printer, then lists each printer directly, followed by Check for Updates, Preferences, the current transfer status, and Quit. Only one
+On launch Forward opens its window: onboarding on first launch, the slicer after.
+The menu starts with Open Slicer, Add Printer…, and the organization, then lists the
+organization's Forward printers, followed by Check for Updates, Preferences, the
+current transfer status, and Quit. Only one
 transfer runs at a time. Success means the printer accepted the print request, not that the
 first layer has begun. Busy printers are not interrupted. Start commands are
 never automatically retried; after an unconfirmed start, check the printer
@@ -20,21 +23,39 @@ Bambu receives the original `.gcode.3mf`. Temporary downloads are deleted after
 each transfer. Archive members are read without extracting a directory tree.
 Long menu status messages are ellipsized; the tray tooltip retains the full text.
 
-## Startup and notification preferences
+## Onboarding and Forward's pages
 
-On the first successful launch, Forward asks whether to **launch when you sign
-in** and **notify you when a plate is sent through Forward**. Both choices default
-to off. Choose **Open Setup** to save your choices, or **Skip** to keep the defaults;
-either option dismisses setup for future launches. Closing the setup dialog also skips it.
-Choose **Preferences…** from the menu bar / system tray to change either choice
-later. Existing users see the setup dialog once after updating.
+`web/` is a React app (Vite, TypeScript) that CMake builds into a single
+`index.html` (script and styles inlined) and embeds as the `:/web/index.html` Qt
+resource; the build needs Node.js and npm. `src/app/SetupServer.cpp` serves it at
+`http://127.0.0.1:18744/`, with Forward's fonts at `/fonts/`, and answers the
+`/api/app/*` routes it calls. Those routes accept only Forward's own origin
+(`127.0.0.1:18744` or `localhost:18744`, checked against `Host` and `Origin`).
 
-**Open Setup** also opens printer setup at
-`https://mirdainsystems.com/forward/#setup` in the default browser, once. **Set Up
-Printer…** reopens the page at any time. On macOS, when Safari is the default, the page
-opens in an installed Chrome, Edge, Brave, Arc, Firefox, or Chromium instead, because
-Safari cannot reach Forward from the website (`src/platform/macos/SupportedBrowser.mm`). Test builds can point at a local preview with
-`-DFORWARD_SETUP_URL=http://localhost:3000/forward/` (Forward appends `#setup`).
+On first launch the window shows onboarding:
+
+1. **Preferences**: launch at sign-in, plate notifications, and automatic update
+   checks. **Preferences…** in the menu reopens this page at `#/preferences`.
+2. **Sign in**: Forward opens Cognito's hosted sign-in in the default browser
+   (authorization code with PKCE, redirected to `http://localhost:18744/callback`),
+   and the page polls `/api/app/state` until Forward has exchanged the code.
+   `src/app/Account.cpp` keeps the refresh token in `printers.json` and calls the
+   Mirdain API with it, so the pages never see a token and the API needs no CORS
+   for localhost.
+3. **Organization**: choosing one calls `SetupServer::switchOrganization`, which
+   loads the organization's slicer printers that have a connection
+   (`overrides.mirdain_connection`) and replaces the menu's printers with them.
+   Forward refreshes them on each launch. **Organization: …** in the menu changes it later.
+4. **Get started**: Add a printer (highlighted) or open the slicer.
+
+Add Printer (`web/src/AddPrinter.tsx`, also **Add Printer…** in the menu) is
+copied from Aperture's `ForwardSetup.tsx` without its Verify Forward step, along with
+`SelectPicker`, `PrinterPresetDialog`, the setup styles, and the Order Parts step
+animation. Forward's menu opens `#/add-printer` and `#/organization`.
+
+For hot reload, run Forward, then `npm run dev` in `web/` and open
+`http://127.0.0.1:5174/`; Vite proxies `/api/app` and `/fonts` to Forward. Test
+builds can point at another API with `-DFORWARD_API_URL=…`.
 
 Automatic startup is registered only when you explicitly enable it. On macOS
 13+, `src/platform/macos/StartupRegistration.mm` uses ServiceManagement's
@@ -60,7 +81,7 @@ while it is already running opens the slicer window: macOS sends the running app
 reopen event, and on other platforms the second instance posts `/show` to the running
 one before exiting.
 
-`AppPreferences` owns the shared setup/preferences dialog. `StartupRegistration`
+`AppPreferences` owns the preferences that the preferences page reads and saves. `StartupRegistration`
 and `NotificationSender` provide platform-specific behavior behind shared class
 interfaces. `AppConfig` reads and atomically writes sections of the existing
 `printers.json`, preserving both printer settings and app preferences:
@@ -69,9 +90,14 @@ interfaces. `AppConfig` reads and atomically writes sections of the existing
 {
   "printers": {},
   "preferences": {
-    "setup_complete": true,
+    "onboarding_complete": true,
     "launch_at_sign_in": false,
     "notifications_enabled": false
+  },
+  "account": {
+    "refresh_token": "…",
+    "email": "maker@example.com",
+    "organization": {"id": 1, "name": "Workshop"}
   }
 }
 ```
@@ -85,7 +111,7 @@ Older files containing only `printers` remain readable.
 Forward integrates Sparkle 2.10.1 on macOS and WinSparkle 0.9.4 on Windows.
 CMake downloads the pinned SDKs with SHA-256 verification and bundles the
 framework/DLL. **Check for Updates…** uses the native updater UI. Preferences
-and first-launch setup offer **Automatically check for updates**, initially off.
+offers **Automatically check for updates**, initially off.
 Update preferences are stored by each native updater (NSUserDefaults on macOS,
 WinSparkle's registry settings on Windows), so changes in native update dialogs
 are reflected in Preferences. Forward does not duplicate them in `printers.json`.
@@ -395,6 +421,28 @@ open), `ejected` is `false` and `eject_error` gives the reason.
 With no drive connected it returns 404 with `{"code":"no_usb","error":"…"}`
 before downloading. It shares the one-transfer limit with `/send` (409), and
 download or write failures return 502 with `{"error":"…"}`.
+
+### Loaded filaments
+
+`POST http://127.0.0.1:18744/filaments` with `{"connection": {…}, "printer_model": "Bambu Lab P1S"}`
+reads the printer's loaded spools (bridge method `filaments` in the slicer window). Only
+`bambu_lan` is supported; other protocols return 400 with `{"code":"unsupported","error":"…"}`.
+Forward connects over LAN MQTT, requests `pushall`, and answers from the full status report
+(`src/printers/BambuFilaments.cpp`, a port of `mirdain_printer_client`'s `_filament_units`).
+`printer_model` is optional; it supplies extruders for P1P/P1S/X1C firmware that omits AMS info.
+It does not count as a transfer, so it runs during one.
+
+Success is HTTP 200 with mirdain_server's `PrinterFilamentUnit` list, external spools first:
+
+```json
+{"ok":true,"filaments":[
+  {"id":null,"filaments":[{"slot_id":"255","material_id":"GFL99","color":"#FFFFFF","extruder":0}]},
+  {"id":"0","ams_type":1,"filaments":[{"slot_id":"0","material_id":"GFA00","color":"#161616","extruder":0}]}
+]}
+```
+
+`material_id` is Bambu's `tray_info_idx` (`null` when unset) and `color` is `#RRGGBB` or `null`.
+Connection failures and a 15-second timeout return 502 with `{"error":"…"}`.
 
 ## Connection protocols
 

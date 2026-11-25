@@ -50,8 +50,40 @@ PrinterSender *PrinterSettings::remember(const QJsonObject &request)
     return printers.at(key).get();
 }
 
+void PrinterSettings::replaceWithOrganization(const QJsonArray &slicerPrinters)
+{
+    // Senders are in use until the transfer finishes.
+    if (transferring) throw std::runtime_error("Wait for the current transfer to finish, then try again.");
+    std::map<QString, std::unique_ptr<PrinterSender>> updated;
+    QJsonObject json;
+    for (const auto &value : slicerPrinters) {
+        const auto printer = value.toObject();
+        const auto connection = printer.value("overrides").toObject().value("mirdain_connection").toObject();
+        if (connection.isEmpty()) continue;
+        const auto id = printer.value("id").toString();
+        const auto key = "custom:" + id;
+        auto sender = PrinterSender::create(connection.value("protocol").toString());
+        const auto existing = printers.find(key);
+        if (existing != printers.end()) sender->loadJson(existing->second->toJson());
+        sender->setIdentity(id, printer.value("name").toString(), sender->connectionKey(connection));
+        json.insert(key, sender->toJson());
+        updated[key] = std::move(sender);
+    }
+    config.setSection("printers", json);
+    printers = std::move(updated);
+    rebuildMenu();
+}
+
+QList<PrinterSettings::Entry> PrinterSettings::entries() const
+{
+    QList<Entry> result;
+    for (const auto &[key, sender] : printers) result.append({sender->customPrinterId(), sender->name()});
+    return result;
+}
+
 void PrinterSettings::setBusy(bool busy)
 {
+    transferring = busy;
     for (auto *action : printerActions)
         if (action->menu()) action->setEnabled(!busy);
 }
@@ -64,7 +96,7 @@ void PrinterSettings::rebuildMenu()
     }
     printerActions.clear();
     if (printers.empty()) {
-        auto *empty = new QAction("Printers appear after Send and print", &menu);
+        auto *empty = new QAction("No printers yet", &menu);
         empty->setEnabled(false);
         menu.insertAction(separator, empty);
         printerActions.append(empty);

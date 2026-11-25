@@ -10,6 +10,8 @@
 #include <WebView2.h>
 #include <wrl.h>
 
+#include <vector>
+
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
 
@@ -86,11 +88,16 @@ struct SlicerWindow::Impl {
     QUrl url;
     Handler handler;
     HostWidget window;
+    ComPtr<ICoreWebView2Environment> environment;
     ComPtr<ICoreWebView2> webview;
     bool started = false;
+    // The page the window loads once WebView2 is ready, and the latest main-frame navigation.
+    QUrl current;
+    QStringList openedFiles;
 
     void start();
     void configure();
+    void deliverOpenedFiles();
 };
 
 void SlicerWindow::Impl::start()
@@ -111,9 +118,10 @@ void SlicerWindow::Impl::start()
                     // The WebView2 Runtime is missing; the browser still reaches Forward over HTTP.
                     window.hide();
                     started = false;
-                    QDesktopServices::openUrl(url);
+                    QDesktopServices::openUrl(current);
                     return S_OK;
                 }
+                this->environment = environment;
                 return environment->CreateCoreWebView2Controller(reinterpret_cast<HWND>(window.winId()),
                     Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                         [this](HRESULT result, ICoreWebView2Controller *controller) -> HRESULT {
@@ -123,7 +131,7 @@ void SlicerWindow::Impl::start()
                             window.webview = webview;
                             window.fit();
                             configure();
-                            return webview->Navigate(wide(url.toString()).c_str());
+                            return webview->Navigate(wide(current.toString(QUrl::FullyEncoded)).c_str());
                         }).Get());
             }).Get());
 }
@@ -159,10 +167,12 @@ void SlicerWindow::Impl::configure()
                 args->put_Cancel(TRUE);
                 return S_OK;
             }
-            if ((target.scheme() == "http" || target.scheme() == "https") && !isSlicerHost(url, target.host())) {
+            if ((target.scheme() == "http" || target.scheme() == "https") && !isWindowPage(url, target)) {
                 args->put_Cancel(TRUE);
                 QDesktopServices::openUrl(target);
+                return S_OK;
             }
+            current = target;
             return S_OK;
         }).Get(), &token);
 
@@ -173,7 +183,7 @@ void SlicerWindow::Impl::configure()
             args->get_Uri(&uri);
             const QUrl target(takeString(uri));
             args->put_Handled(TRUE);
-            if (isSlicerHost(url, target.host())) webview->Navigate(wide(target.toString()).c_str());
+            if (isWindowPage(url, target)) webview->Navigate(wide(target.toString()).c_str());
             else QDesktopServices::openUrl(target);
             return S_OK;
         }).Get(), &token);
@@ -191,11 +201,16 @@ void SlicerWindow::Impl::configure()
                 const QJsonObject result{{"id", id}, {"status", status}, {"body", body}};
                 webview->PostWebMessageAsJson(wide(QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact))).c_str());
             };
-            if (!isSlicerHost(url, QUrl(takeString(source)).host())) {
+            if (!isWindowPage(url, QUrl(takeString(source)))) {
                 reply(403, {{"error", "Forward is not available to this page."}});
                 return S_OK;
             }
             const auto method = message.value("method").toString();
+            if (method == "requestOpenedFiles") {
+                deliverOpenedFiles();
+                reply(200, {});
+                return S_OK;
+            }
             // The header's caption buttons.
             if (method == "minimize" || method == "toggleMaximize" || method == "close") {
                 if (method == "minimize") window.showMinimized();
@@ -212,17 +227,73 @@ void SlicerWindow::Impl::configure()
     // File pickers and downloads (to the user's Downloads folder) use WebView2's built-in UI.
 }
 
+// Posts the queued models as read-only FileSystemFileHandles, which the page turns into Files.
+void SlicerWindow::Impl::deliverOpenedFiles()
+{
+    if (openedFiles.isEmpty()) return;
+    ComPtr<ICoreWebView2Environment14> files;
+    ComPtr<ICoreWebView2_23> poster;
+    environment.As(&files);
+    webview.As(&poster);
+    std::vector<ComPtr<ICoreWebView2FileSystemHandle>> handles(openedFiles.size());
+    std::vector<IUnknown *> items;
+    for (qsizetype index = 0; index < openedFiles.size(); ++index) {
+        files->CreateWebFileSystemFileHandle(wide(QDir::toNativeSeparators(openedFiles[index])).c_str(),
+            COREWEBVIEW2_FILE_SYSTEM_HANDLE_PERMISSION_READ_ONLY, &handles[index]);
+        items.push_back(handles[index].Get());
+    }
+    ComPtr<ICoreWebView2ObjectCollection> collection;
+    files->CreateObjectCollection(UINT32(items.size()), items.data(), &collection);
+    poster->PostWebMessageAsJsonWithAdditionalObjects(L"{\"event\":\"openedFiles\"}", collection.Get());
+    openedFiles.clear();
+}
+
 SlicerWindow::SlicerWindow(const QUrl &url, Handler handler) : url(url), impl(new Impl(this, url, std::move(handler))) {}
 
 SlicerWindow::~SlicerWindow() = default;
 
 void SlicerWindow::load(const QUrl &target)
 {
-    impl->webview->Navigate(wide(target.toString(QUrl::FullyEncoded)).c_str());
+    impl->current = target;
+    // Before WebView2 is ready, start() navigates to current.
+    if (impl->webview) impl->webview->Navigate(wide(target.toString(QUrl::FullyEncoded)).c_str());
 }
+
+bool SlicerWindow::showingSlicer() const { return isSlicerHost(url, impl->current.host()); }
+
+void SlicerWindow::setSlicerUrl(const QUrl &slicer)
+{
+    if (slicer == url) return;
+    url = slicer;
+    impl->url = slicer;
+    if (showingSlicer()) load(url);
+}
+
+void SlicerWindow::accountChanged()
+{
+    if (impl->webview) impl->webview->ExecuteScript(L"window.dispatchEvent(new Event('mirdainforwardaccount'))", nullptr);
+}
+
+void SlicerWindow::showPage(const QUrl &page)
+{
+    load(page);
+    show();
+}
+
+void SlicerWindow::openFiles(const QStringList &paths)
+{
+    if (paths.isEmpty()) return;
+    impl->openedFiles.append(paths);
+    showSlicer();
+    if (impl->webview) impl->webview->ExecuteScript(L"window.dispatchEvent(new Event('mirdainforwardopen'))", nullptr);
+}
+
+// Stub: Windows has no drop panel yet, so models sent to Gwaith open normally.
+void SlicerWindow::sendToGwaith(const QStringList &paths, const QJsonObject &) { openFiles(paths); }
 
 void SlicerWindow::show()
 {
+    if (impl->current.isEmpty()) impl->current = url;
     if (!impl->started) impl->start();
     impl->window.showNormal();
     impl->window.raise();
