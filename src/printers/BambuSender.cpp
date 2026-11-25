@@ -1,5 +1,6 @@
 #include "printers/BambuSender.h"
 #include "archive/ZipArchive.h"
+#include "printers/BambuMqtt.h"
 
 #include <QBuffer>
 #include <QJsonDocument>
@@ -65,6 +66,7 @@ void BambuSendJob::send(PrinterFile input)
     if (model == "Bambu Lab P1P" || model == "Bambu Lab P1S") startTimeout = 180000;
     emit progress("Connecting to Bambu LAN…");
     connect(&mqtt, &QMqttClient::connected, this, [this] {
+        connected = true;
         auto *subscription = mqtt.subscribe(QMqttTopicFilter("device/" + serial + "/report"));
         if (!subscription) {
             finish("Bambu report subscription failed.");
@@ -76,18 +78,39 @@ void BambuSendJob::send(PrinterFile input)
         });
     });
     connect(&mqtt, &QMqttClient::errorChanged, this, [this](QMqttClient::ClientError error) {
-        if (error != QMqttClient::NoError)
-            finish(QString("Bambu MQTT connection failed (%1). Check the LAN access code and Developer Mode.").arg(int(error)));
+        if (connected && error != QMqttClient::NoError)
+            finish(bambuMqttError(mqtt, error));
     });
     connect(&mqtt, &QMqttClient::disconnected, this, [this] {
-        finish("Bambu disconnected before print confirmation. Check the printer before retrying.");
+        if (connected) {
+            finish("Bambu disconnected before print confirmation. Check the printer before retrying.");
+            return;
+        }
+        // A failed connection attempt. Qt reports the error after the state change.
+        QTimer::singleShot(0, this, [this] {
+            if (done) return;
+            // An idle P1P's Wi-Fi can sleep, failing the first attempts with Host unreachable
+            // until the network wakes it.
+            if (mqtt.error() == QMqttClient::TransportInvalid && connectAttempts < 4) {
+                emit progress("Waking the Bambu printer…");
+                QTimer::singleShot(2000, this, [this] { if (!done) connectMqtt(); });
+                return;
+            }
+            finish(bambuMqttError(mqtt, mqtt.error()));
+        });
     });
     connect(&mqtt, &QMqttClient::messageReceived, this, [this](const QByteArray &bytes, const QMqttTopicName &) {
         receive(QJsonDocument::fromJson(bytes).object().value("print").toObject());
     });
     // Bambu LAN services use the printer's self-signed certificate.
-    auto tls = QSslConfiguration::defaultConfiguration();
+    tls = QSslConfiguration::defaultConfiguration();
     tls.setPeerVerifyMode(QSslSocket::VerifyNone);
+    connectMqtt();
+}
+
+void BambuSendJob::connectMqtt()
+{
+    ++connectAttempts;
     timeout.start(15000);
     mqtt.connectToHostEncrypted(tls);
 }

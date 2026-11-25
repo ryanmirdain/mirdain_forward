@@ -11,15 +11,33 @@
 
 static constexpr CGFloat CardWidth = 300, Padding = 12, IconSize = 16, TextInset = Padding + IconSize + 10, CloseSize = 22;
 
+// Text and icons in a row pass clicks through to it, so clicking anywhere on the row works.
+@interface RowLabel : NSTextField
+@end
+
+@implementation RowLabel
+- (NSView *)hitTest:(NSPoint)point { return nil; }
+@end
+
+@interface RowIcon : NSImageView
+@end
+
+@implementation RowIcon
+- (NSView *)hitTest:(NSPoint)point { return nil; }
+@end
+
+// lines is the most lines to show, or 0 for all of them.
 static NSTextField *label(NSString *text, NSFont *font, NSColor *color, CGFloat width, NSInteger lines)
 {
-    auto *field = lines == 1 ? [NSTextField labelWithString:text] : [NSTextField wrappingLabelWithString:text];
+    auto *field = lines == 1 ? [RowLabel labelWithString:text] : [RowLabel wrappingLabelWithString:text];
     // Wrapping labels are selectable by default, which would take clicks meant for the row.
     field.selectable = NO;
     field.font = font;
     field.textColor = color;
     field.maximumNumberOfLines = lines;
-    field.lineBreakMode = NSLineBreakByTruncatingTail;
+    // Truncating mid-line turns wrapping off, so a multi-line label wraps and only cuts its
+    // last visible line short.
+    field.lineBreakMode = lines == 1 ? NSLineBreakByTruncatingTail : NSLineBreakByWordWrapping;
     field.cell.truncatesLastVisibleLine = YES;
     field.preferredMaxLayoutWidth = width;
     field.frame = NSMakeRect(0, 0, width, field.fittingSize.height);
@@ -28,7 +46,7 @@ static NSTextField *label(NSString *text, NSFont *font, NSColor *color, CGFloat 
 
 static NSImageView *symbol(NSString *name, NSColor *color)
 {
-    auto *image = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:name accessibilityDescription:nil]];
+    auto *image = [RowIcon imageViewWithImage:[NSImage imageWithSystemSymbolName:name accessibilityDescription:nil]];
     image.contentTintColor = color;
     image.frame = NSMakeRect(0, 0, IconSize, IconSize);
     return image;

@@ -82,14 +82,21 @@ NSView *mirdainCard(NSSize size, NSView **content, bool notch)
     return root;
 }
 
+@interface MirdainPanel : NSPanel
+@end
+
+@implementation MirdainPanel
+// AppKit moves windows clear of the menu bar, which the panel's shadow margin overlaps, nudging
+// the card off its icon.
+- (NSRect)constrainFrameRect:(NSRect)frame toScreen:(NSScreen *)screen { return frame; }
+@end
+
 // Borderless windows can't become key unless they say so.
-@interface MirdainKeyPanel : NSPanel
+@interface MirdainKeyPanel : MirdainPanel
 @end
 
 @implementation MirdainKeyPanel
 - (BOOL)canBecomeKeyWindow { return YES; }
-// AppKit moves key windows clear of the menu bar, which the panel's shadow margin overlaps.
-- (NSRect)constrainFrameRect:(NSRect)frame toScreen:(NSScreen *)screen { return frame; }
 @end
 
 NSView *mirdainCardContent(NSView *root)
@@ -120,7 +127,7 @@ void mirdainGrowCard(NSView *root, NSSize from, CFTimeInterval duration)
 
 NSPanel *mirdainPanel(bool keyable)
 {
-    NSPanel *panel = [[(keyable ? MirdainKeyPanel.class : NSPanel.class) alloc] initWithContentRect:NSZeroRect
+    NSPanel *panel = [[(keyable ? MirdainKeyPanel.class : MirdainPanel.class) alloc] initWithContentRect:NSZeroRect
         styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
         backing:NSBackingStoreBuffered defer:YES];
     panel.level = NSStatusWindowLevel;
@@ -128,6 +135,9 @@ NSPanel *mirdainPanel(bool keyable)
     panel.backgroundColor = NSColor.clearColor;
     panel.hasShadow = NO;
     panel.hidesOnDeactivate = NO;
+    // Cards stay under their icon: a click with a little movement on a transparent view would
+    // otherwise drag the window.
+    panel.movable = NO;
     panel.releasedWhenClosed = NO;
     panel.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
     panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;

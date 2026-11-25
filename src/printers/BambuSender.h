@@ -4,6 +4,7 @@
 #include "printers/BambuFtpsUpload.h"
 
 #include <QMqttClient>
+#include <QSslConfiguration>
 #include <QJsonArray>
 #include <QTimer>
 
@@ -39,6 +40,10 @@ private:
     bool awaitingIdle = false;
     bool uploaded = false;
     bool startSent = false;
+    bool connected = false;
+    int connectAttempts = 0;
+    QSslConfiguration tls;
+    void connectMqtt();
     bool done = false;
 
     bool publish(const QJsonObject &message);

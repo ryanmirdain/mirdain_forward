@@ -1,4 +1,5 @@
 #include "printers/BambuFilaments.h"
+#include "printers/BambuMqtt.h"
 #include "printers/PrinterSendJob.h"
 
 #include <QJsonDocument>
@@ -82,7 +83,7 @@ void BambuFilaments::start()
     });
     connect(&mqtt, &QMqttClient::errorChanged, this, [this](QMqttClient::ClientError error) {
         if (error != QMqttClient::NoError)
-            finish(QString("Bambu MQTT connection failed (%1). Check the LAN access code and Developer Mode.").arg(int(error)));
+            finish(bambuMqttError(mqtt, error));
     });
     connect(&mqtt, &QMqttClient::disconnected, this, [this] { finish("Bambu disconnected before reporting filaments."); });
     connect(&mqtt, &QMqttClient::messageReceived, this, [this](const QByteArray &bytes, const QMqttTopicName &) {
