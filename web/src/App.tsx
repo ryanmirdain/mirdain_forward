@@ -299,11 +299,10 @@ function OrganizationStep({ state, onDone }: { state: AppState; onDone: (state: 
   return <form onSubmit={event => { event.preventDefault(); void save() }}>
     <div className="forward-heading"><h2 ref={heading} tabIndex={-1}>Choose your organization.</h2></div>
     <p>Forward uses this organization for the slicer and to send to printers. You can change it later from the menu bar.</p>
-    {!memberships && !error && <p role="status">Loading your organizations…</p>}
     {memberships && !memberships.length && <p>Ask an organization owner to invite you, then <button type="button" className="forward-retry" onClick={() => setAttempt(value => value + 1)}>check again</button>.</p>}
-    {memberships && memberships.length > 0 && <div className="forward-field"><span id="organization-label" className="forward-field-label">Organization</span>
-      <SelectPicker value={organization} ariaLabelledBy="organization-label" onValueChange={setOrganization}
-        options={memberships.map(item => ({ value: String(item.id), label: item.name }))} /></div>}
+    {(!memberships || memberships.length > 0) && <div className="forward-field" aria-busy={!memberships}><span id="organization-label" className="forward-field-label">Organization</span>
+      <SelectPicker value={organization} ariaLabelledBy="organization-label" onValueChange={setOrganization} placeholder="" disabled={!memberships}
+        options={(memberships ?? []).map(item => ({ value: String(item.id), label: item.name }))} /></div>}
     {error && <div className="forward-setup-error" role="alert"><p>{error}</p>{!memberships && <button type="button" className="forward-retry" onClick={() => setAttempt(value => value + 1)}>Retry</button>}</div>}
     <div className="forward-step-actions"><button className="button" disabled={pending || !organization}>{pending ? 'Loading printers…' : 'Continue'}<span aria-hidden="true">→</span></button></div>
   </form>

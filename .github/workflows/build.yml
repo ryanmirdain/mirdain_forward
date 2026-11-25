@@ -28,6 +28,8 @@ jobs:
   build:
     name: ${{ matrix.platform }}-${{ matrix.cpu }}
     runs-on: ${{ matrix.runner }}
+    # Windows release builds read the Artifact Signing secret from the release environment.
+    environment: ${{ inputs.release && matrix.platform == 'windows' && 'release' || '' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -122,15 +124,32 @@ jobs:
       - name: Package Windows
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          # Releases are signed once Artifact Signing is configured (packaging/updates/README.md).
+          SIGN: ${{ inputs.release && vars.FORWARD_SIGNING_ACCOUNT != '' }}
+          FORWARD_SIGNING_ENDPOINT: ${{ vars.FORWARD_SIGNING_ENDPOINT }}
+          FORWARD_SIGNING_ACCOUNT: ${{ vars.FORWARD_SIGNING_ACCOUNT }}
+          FORWARD_SIGNING_PROFILE: ${{ vars.FORWARD_SIGNING_PROFILE }}
+          AZURE_TENANT_ID: ${{ vars.FORWARD_SIGNING_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ vars.FORWARD_SIGNING_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.FORWARD_SIGNING_CLIENT_SECRET }}
         run: |
           New-Item -ItemType Directory -Path dist -Force
+          $iscc = @()
+          if ($env:SIGN -eq 'true') {
+            # Every binary Forward loads, so Smart App Control allows them, before the
+            # Microsoft-signed runtime DLLs join them.
+            pwsh -NoProfile -File packaging/windows/sign.ps1 (Get-ChildItem build/Release -Recurse -Include *.exe, *.dll).FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $iscc = '/DSign', "/Sforward=pwsh -NoProfile -File `$q$PWD/packaging/windows/sign.ps1`$q `$f"
+          }
           Copy-Item README.md build/Release/README.md
           Copy-Item LICENSE build/Release/LICENSE
           Copy-Item build/_deps/miniz-src/LICENSE build/Release/miniz-LICENSE
           Copy-Item build-deps/qtmqtt/LICENSES/GPL-3.0-only.txt build/Release/QtMqtt-LICENSE
           Copy-Item "$env:VCToolsRedistDir/x64/Microsoft.VC143.CRT/*.dll" build/Release/
           Compress-Archive -Path build/Release/* -DestinationPath dist/mirdain_forward-windows-x64.zip
-          & "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe" build/installer.iss
+          & "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe" @iscc build/installer.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Record release build metadata

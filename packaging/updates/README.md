@@ -42,6 +42,38 @@ are base64-encoded raw 32-byte values and are created with mode 0600 on Unix.
 `configure-github` uploads private values through stdin to environment secrets
 and configures the public keys and feed URLs. It does not rotate keys.
 
+## Windows code signing
+
+Windows release builds are signed with Azure Artifact Signing (formerly Trusted
+Signing) as Mirdain Systems once it is configured: every `.exe` and `.dll` in
+the app, the setup installer, and its uninstaller. Until then releases are
+built unsigned as before. Signing happens before the Ed25519 update signature,
+so the signed bytes are the ones the update feed verifies.
+
+1. Create an Artifact Signing account, complete organization identity
+   validation, and create a **Public Trust** certificate profile
+   (https://aka.ms/artifactsigning).
+2. Create an app registration (service principal) with a client secret, and
+   give it the **Artifact Signing Certificate Profile Signer** role on the
+   certificate profile.
+3. Add the secret `FORWARD_SIGNING_CLIENT_SECRET` to the `release` environment.
+4. Add these repository variables:
+   - `FORWARD_SIGNING_ENDPOINT`: the account's regional endpoint, such as
+     `https://eus.codesigning.azure.net`; a mismatched region fails with 403
+   - `FORWARD_SIGNING_ACCOUNT`: the account name; setting it turns signing on
+   - `FORWARD_SIGNING_PROFILE`: the certificate profile name
+   - `FORWARD_SIGNING_TENANT_ID` and `FORWARD_SIGNING_CLIENT_ID`: the app
+     registration's tenant and client IDs
+
+`packaging/windows/sign.ps1` does the signing and works locally too: set the
+three `FORWARD_SIGNING_*` account variables, run `az login`, then pass it the
+files. To sign a local installer, compile it with
+`ISCC /DSign "/Sforward=pwsh -NoProfile -File $q<repo>\packaging\windows\sign.ps1$q $f" build\installer.iss`.
+
+SmartScreen warnings fade as the certificate builds download reputation; signing
+shows Mirdain Systems as the publisher immediately and is required for Smart
+App Control.
+
 ## Publish a version
 
 1. Update `project(... VERSION ...)` in `CMakeLists.txt`.
@@ -107,11 +139,11 @@ Forward anymore.
 ## Platform signing and compatibility
 
 This pipeline signs update packages for Sparkle/WinSparkle verification. Apple
-Developer ID signing/notarization and Windows Authenticode publisher signing
-remain deferred: the build still uses ad-hoc macOS signatures and unsigned
-Windows executables. Update-package signatures do not remove OS publisher
-warnings. Add OS signing before packaging and Ed25519 signing when that setup
-is ready; never change installer bytes after calculating an update signature.
+Developer ID signing/notarization remains deferred: macOS builds use ad-hoc
+signatures. Windows builds get Authenticode signatures once Artifact Signing is
+configured (see Windows code signing). Update-package signatures do not remove
+OS publisher warnings. OS signing happens before packaging and Ed25519 signing;
+never change installer bytes after calculating an update signature.
 
 Release installers target macOS 12.0 and Windows 10.0.17763. Keep the deployment
 targets, installer minimum, and `PLATFORMS` in `tools/release_updates.py` aligned

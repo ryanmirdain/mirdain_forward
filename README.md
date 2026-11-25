@@ -399,7 +399,8 @@ macOS artifact to find the DMG; Windows artifacts contain both the setup install
 preserve the app bundle's symlinks and permissions. macOS DMGs collect licenses
 in a **Licenses** folder and omit the README. Windows ZIPs include the README
 and licenses. Third-party licenses include libbgcode (AGPL-3.0), Heatshrink, and zlib.
-macOS uses ad-hoc signing; Windows builds are unsigned. This
+macOS uses ad-hoc signing. Windows release builds are signed once Artifact Signing
+is configured ([setup](packaging/updates/README.md#windows-code-signing)); other Windows builds are unsigned. This
 workflow builds and packages only; it does not run tests or publish releases.
 The separate **Release Forward** workflow handles version tags, update signing,
 and permanent GitHub Release downloads after one-time configuration. Website XML

@@ -27,6 +27,12 @@ OutputBaseFilename=mirdain_forward-windows-x64-setup
 Compression=lzma2
 SolidCompression=yes
 ChangesAssociations=yes
+; ISCC /DSign /Sforward="pwsh -NoProfile -File <source>/packaging/windows/sign.ps1 $f" signs the
+; installer and the uninstaller it writes. Without /DSign, both are unsigned.
+#ifdef Sign
+SignTool=forward
+SignedUninstaller=yes
+#endif
 
 [Files]
 Source: "@CMAKE_CURRENT_BINARY_DIR@/Release/*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
