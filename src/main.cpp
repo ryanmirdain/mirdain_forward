@@ -52,7 +52,6 @@
 using Status = QHttpServerResponder::StatusCode;
 using Reply = std::function<void(Status, const QJsonObject &)>;
 static const QUrl SlicerUrl(FORWARD_SLICER_URL);
-constexpr bool DropPanelEnabled = false;
 
 // The slicer locked to Forward's organization: with organization set, and force_org not false,
 // it hides its organization picker. Unlocked until an organization is chosen.
@@ -239,8 +238,7 @@ public:
             if (account.signedIn()) slicer->show();
         };
         // Models dropped on the panel that appears under the tray icon during a drag go to Gwaith.
-        // Disabled for now; the panel still builds so it can be turned back on here.
-        if (DropPanelEnabled) dragWatcher = std::make_unique<DragWatcher>(tray, [this] {
+        dragWatcher = std::make_unique<DragWatcher>(tray, [this] {
             QList<DragWatcher::Target> targets;
             for (const auto &printer : printerSettings.entries()) targets.append({printer.id, printer.name});
             return targets;

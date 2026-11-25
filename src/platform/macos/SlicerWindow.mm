@@ -93,15 +93,6 @@ static constexpr CGFloat HeaderHeight = 51;
     [configuration.userContentController addUserScript:[[WKUserScript alloc]
         initWithSource:@"window.mirdainForward = { titleBar: 'left' }"
         injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES]];
-    [configuration.userContentController addUserScript:[[WKUserScript alloc]
-        initWithSource:@"(() => { const send = (kind, args) => window.webkit.messageHandlers.mirdainForward.postMessage({ method: 'debugLog', body: { kind, text: args.map(a => a instanceof Error ? a.stack || a.message : typeof a === 'object' ? (() => { try { return JSON.stringify(a) } catch { return String(a) } })() : String(a)).join(' ') } }).catch(() => {});"
-            "for (const kind of ['error', 'warn', 'log', 'info']) { const original = console[kind]; console[kind] = (...args) => { send(kind, args); original.apply(console, args) } }"
-            "addEventListener('error', e => send('onerror', [e.message, e.filename + ':' + e.lineno]));"
-            "addEventListener('unhandledrejection', e => send('rejection', [e.reason]));"
-            "document.addEventListener('change', e => send('change', [e.target.tagName, e.target.accept, e.target.files && e.target.files.length]), true);"
-            "const fetch0 = window.fetch; window.fetch = async (...a) => { const url = String(a[0] && a[0].url || a[0]); try { const r = await fetch0(...a); send('fetch', [a[1] && a[1].method || 'GET', url.slice(0, 120), r.status]); return r } catch (e) { send('fetch', ['FAILED', url.slice(0, 120), String(e)]); throw e } };"
-            "const xopen = XMLHttpRequest.prototype.open; XMLHttpRequest.prototype.open = function (m, u, ...r) { this.addEventListener('loadend', () => send('xhr', [m, String(u).slice(0, 120), this.status])); return xopen.call(this, m, u, ...r) } })()"
-        injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES]];
 
     _webView = [[WKWebView alloc] initWithFrame:NSZeroRect configuration:configuration];
     _webView.navigationDelegate = self;
@@ -181,7 +172,6 @@ static constexpr CGFloat HeaderHeight = 51;
 
 - (void)openFiles:(NSArray<NSURL *> *)urls gwaithPrinter:(NSString *)printer
 {
-    NSLog(@"DEBUGOPEN openFiles %@ showingSlicer=%d requested=%@", urls, [self showingSlicer], _requestedURL);
     if (printer) [_gwaithDrops addObject:@{@"urls": [urls mutableCopy], @"printer": printer}];
     else [_openedFiles addObjectsFromArray:urls];
     _impl->owner->showSlicer();
@@ -196,13 +186,11 @@ static constexpr CGFloat HeaderHeight = 51;
 - (void)deliverOpenedFiles
 {
     NSDictionary *drop = _gwaithDrops.firstObject;
-    NSLog(@"DEBUGOPEN deliverOpenedFiles queued=%lu", (unsigned long)_openedFiles.count);
     if (!drop && !_openedFiles.count) return;
     _answering = drop ? drop[@"urls"] : _openedFiles;
     NSString *script = drop ? [NSString stringWithFormat:@"window.mirdainForwardOpen?.('gwaith', %@) === true", drop[@"printer"]]
                             : @"window.mirdainForwardOpen?.('model') === true";
-    [_webView evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
-        NSLog(@"DEBUGOPEN pick result=%@ error=%@", result, error);
+    [_webView evaluateJavaScript:script completionHandler:^(id, NSError *) {
         self->_answering = nil;
         if (drop && ![drop[@"urls"] count]) [self->_gwaithDrops removeObject:drop];
     }];
@@ -351,7 +339,6 @@ static constexpr CGFloat HeaderHeight = 51;
 - (void)webView:(WKWebView *)webView runOpenPanelWithParameters:(WKOpenPanelParameters *)parameters
     initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(NSArray<NSURL *> *))completionHandler
 {
-    NSLog(@"DEBUGOPEN open panel answering=%lu", (unsigned long)_answering.count);
     if (_answering.count) {
         NSMutableArray<NSURL *> *queue = _answering;
         _answering = nil;
@@ -414,12 +401,6 @@ static constexpr CGFloat HeaderHeight = 51;
     }
     NSDictionary *payload = message.body;
     NSString *method = [payload[@"method"] description];
-    if ([method isEqualToString:@"debugLog"]) {
-        NSLog(@"DEBUGOPEN page %@: %@", payload[@"body"][@"kind"], payload[@"body"][@"text"]);
-        replyHandler(@{@"status": @200, @"body": @{}}, nil);
-        return;
-    }
-    NSLog(@"DEBUGOPEN bridge %@ from %@", method, page.toString().toNSString());
     // Window controls for the page's header, which replaces the title bar.
     if ([method isEqualToString:@"startDrag"]) {
         if (_mouseDown && NSEvent.pressedMouseButtons & 1) [_window performWindowDragWithEvent:_mouseDown];
