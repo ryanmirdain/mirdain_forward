@@ -12,7 +12,6 @@
 #include <WebView2.h>
 #include <wrl.h>
 
-#include <algorithm>
 #include <vector>
 
 using Microsoft::WRL::Callback;
@@ -313,8 +312,7 @@ void SlicerWindow::Impl::configure()
             window.pendingRequests++;
             handler(method, message.value("body").toObject(), [this, reply](int status, const QJsonObject &body) {
                 reply(status, body);
-                window.pendingRequests = std::max(0, window.pendingRequests - 1);
-                if (!window.pendingRequests) window.suspendLater(SuspendDelay);
+                if (!--window.pendingRequests) window.suspendLater(SuspendDelay);
             });
             return S_OK;
         }).Get(), &token);
