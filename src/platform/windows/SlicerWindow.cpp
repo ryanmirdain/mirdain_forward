@@ -1,15 +1,18 @@
 #include "platform/SlicerWindow.h"
 
+#include <QCloseEvent>
 #include <QDesktopServices>
 #include <QDir>
 #include <QEvent>
 #include <QJsonDocument>
 #include <QStandardPaths>
+#include <QTimer>
 #include <QWidget>
 
 #include <WebView2.h>
 #include <wrl.h>
 
+#include <algorithm>
 #include <vector>
 
 using Microsoft::WRL::Callback;
@@ -26,12 +29,50 @@ QString takeString(LPWSTR value)
 
 std::wstring wide(const QString &value) { return value.toStdWString(); }
 
+// While the window is hidden, Forward suspends the page, which frees its renderer's memory (the
+// slicer holds hundreds of MB with a complex plate) and stops its scripts. It waits this long
+// after hiding, so reopening the window soon after stays instant and short work finishes.
+constexpr int SuspendDelay = 60 * 1000;
+// A suspended slicer wakes this often, and for this long, so its keepalive reaches the server:
+// a slicing session expires after 30 idle minutes. Its sockets reconnect then too.
+constexpr int WakeEvery = 10 * 60 * 1000, WakeLength = 20 * 1000;
+
 // A plain Qt window whose native HWND hosts the WebView2 controller. It has no caption:
 // the page's header is the title bar, with its own caption buttons.
 class HostWidget : public QWidget {
 public:
     ComPtr<ICoreWebView2Controller> controller;
     ComPtr<ICoreWebView2> webview;
+    // Bridge requests the page is waiting on Forward to answer; it isn't suspended meanwhile.
+    int pendingRequests = 0;
+
+    HostWidget()
+    {
+        suspendTimer.setSingleShot(true);
+        wakeTimer.setSingleShot(true);
+        connect(&suspendTimer, &QTimer::timeout, this, [this] { suspend(); });
+        connect(&wakeTimer, &QTimer::timeout, this, [this] { resume(WakeLength); });
+    }
+
+    bool hidden() const { return !isVisible() || isMinimized(); }
+
+    // Suspends the page after, if the window is still hidden then.
+    void suspendLater(int after)
+    {
+        if (hidden()) suspendTimer.start(after);
+    }
+
+    // Resumes a suspended page, such as before Forward runs script in it. While the window stays
+    // hidden, the page is suspended again after.
+    void resume(int after = SuspendDelay)
+    {
+        wakeTimer.stop();
+        ComPtr<ICoreWebView2_3> suspendable;
+        BOOL suspended = FALSE;
+        if (webview && SUCCEEDED(webview.As(&suspendable)) && SUCCEEDED(suspendable->get_IsSuspended(&suspended)) && suspended)
+            suspendable->Resume();
+        suspendLater(after);
+    }
 
     // The page swaps its maximize and restore buttons on this attribute.
     void syncMaximized()
@@ -48,16 +89,61 @@ public:
         controller->put_Bounds(bounds);
     }
 
+private:
+    QTimer suspendTimer;
+    QTimer wakeTimer;
+
+    // Freezing the page mid-slice, mid-upload or mid-send would break that work, so the page
+    // is suspended only when Forward owes it no reply and the slicer reports no such work.
+    void suspend()
+    {
+        if (!webview || !hidden() || pendingRequests) return;
+        webview->ExecuteScript(L"!!window.mirdainForwardBusy?.()", Callback<ICoreWebView2ExecuteScriptCompletedHandler>(
+            [this](HRESULT, LPCWSTR busy) -> HRESULT {
+                if (!hidden() || pendingRequests) return S_OK;
+                ComPtr<ICoreWebView2_3> suspendable;
+                // A failed check (null) counts as idle: Forward's own pages report nothing.
+                if ((busy && QString::fromWCharArray(busy) == "true") || FAILED(webview.As(&suspendable))) {
+                    suspendLater(SuspendDelay);
+                    return S_OK;
+                }
+                return suspendable->TrySuspend(Callback<ICoreWebView2TrySuspendCompletedHandler>(
+                    [this](HRESULT, BOOL suspended) -> HRESULT {
+                        // WebView2 declines while, for one, media plays: try again later.
+                        if (suspended) wakeTimer.start(WakeEvery);
+                        else suspendLater(SuspendDelay);
+                        return S_OK;
+                    }).Get());
+            }).Get());
+    }
+
 protected:
+    // Closing a top-level Qt window destroys its native window, and the WebView2 controller
+    // with it: shown again, the window would be blank. Closing only hides it, as Forward keeps
+    // running in the tray. This covers the caption's close button, Alt+F4 and the taskbar.
+    void closeEvent(QCloseEvent *event) override
+    {
+        event->ignore();
+        hide();
+    }
+
     bool event(QEvent *event) override
     {
         const auto handled = QWidget::event(event);
         if (!controller) return handled;
         if (event->type() == QEvent::Resize || event->type() == QEvent::Show) fit();
-        // WebView2 does not follow its host's visibility. Without this, a window closed to the
-        // tray and shown again can stay blank white because the page never paints again.
-        if (event->type() == QEvent::Show || event->type() == QEvent::Hide || event->type() == QEvent::WindowStateChange)
-            controller->put_IsVisible(isVisible() && !isMinimized());
+        // WebView2 does not follow its host's visibility: tell it, so a hidden page stops
+        // rendering, and suspend the page a while later.
+        if (event->type() == QEvent::Show || event->type() == QEvent::Hide || event->type() == QEvent::WindowStateChange) {
+            if (hidden()) {
+                controller->put_IsVisible(FALSE);
+                suspendLater(SuspendDelay);
+            } else {
+                suspendTimer.stop();
+                resume();
+                controller->put_IsVisible(TRUE);
+            }
+        }
         // Popups such as <select> lists are positioned from the parent window.
         if (event->type() == QEvent::Move) controller->NotifyParentWindowPositionChanged();
         if (event->type() == QEvent::WindowActivate) controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
@@ -218,13 +304,18 @@ void SlicerWindow::Impl::configure()
             // The header's caption buttons.
             if (method == "minimize" || method == "toggleMaximize" || method == "close") {
                 if (method == "minimize") window.showMinimized();
-                else if (method == "close") window.close();
+                else if (method == "close") window.hide();
                 else if (window.isMaximized()) window.showNormal();
                 else window.showMaximized();
                 reply(200, {});
                 return S_OK;
             }
-            handler(method, message.value("body").toObject(), reply);
+            window.pendingRequests++;
+            handler(method, message.value("body").toObject(), [this, reply](int status, const QJsonObject &body) {
+                reply(status, body);
+                window.pendingRequests = std::max(0, window.pendingRequests - 1);
+                if (!window.pendingRequests) window.suspendLater(SuspendDelay);
+            });
             return S_OK;
         }).Get(), &token);
 
@@ -276,13 +367,17 @@ void SlicerWindow::setSlicerUrl(const QUrl &slicer)
 bool SlicerWindow::evaluate(const QString &script)
 {
     if (!impl->webview) return false;
+    impl->window.resume();
     impl->webview->ExecuteScript(wide(script).c_str(), nullptr);
     return true;
 }
 
 void SlicerWindow::accountChanged()
 {
-    if (impl->webview) impl->webview->ExecuteScript(L"window.dispatchEvent(new Event('mirdainforwardaccount'))", nullptr);
+    if (!impl->webview) return;
+    // Signing in finishes in the browser while the window may be hidden and the page suspended.
+    impl->window.resume();
+    impl->webview->ExecuteScript(L"window.dispatchEvent(new Event('mirdainforwardaccount'))", nullptr);
 }
 
 void SlicerWindow::showPage(const QUrl &page)
