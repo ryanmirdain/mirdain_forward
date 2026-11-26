@@ -49,6 +49,9 @@ const protocols = [
   { value: 'duet', label: 'Duet · RepRapFirmware', protocol: 'duet', port: '80',
     vendors: /^(seemecnc|meltingplot|construct3d|vivedino|ratrig|custom)$/i,
     help: 'Use a Duet board running RepRapFirmware 3, standalone or with a Raspberry Pi. Use the address you open Duet Web Control at.' },
+  // Any printer linked to SimplyPrint; its host is SimplyPrint's API rather than the printer.
+  { value: 'simplyprint', label: 'SimplyPrint cloud', protocol: 'simplyprint', vendors: /^(?!bambu|bbl$)/i, port: '443', fixedHost: 'api.simplyprint.io',
+    help: 'Use a printer already linked to SimplyPrint. API file uploads need SimplyPrint’s Print Farm plan. Create an API key in SimplyPrint’s account settings; the company and printer IDs appear in SimplyPrint’s URLs.' },
   // Any printer OctoPrint can drive over USB; Bambu Lab printers have no USB print connection.
   { value: 'octoprint', label: 'OctoPrint', protocol: 'octoprint', port: '80', vendors: /^(?!bambu|bbl$)/i,
     help: 'Connect the printer to an OctoPrint server (such as OctoPi) over USB. Use the OctoPrint server’s IP address, and create an API key in OctoPrint under Settings > Application Keys.' },
@@ -56,7 +59,8 @@ const protocols = [
 const supportsVendor = (vendor: string) => protocols.some(item => item.vendors.test(vendor))
 
 function connectionFields(protocol: string): Field[] {
-  const fields: Field[] = [{ key: 'host', label: 'Printer IP address or hostname', hint: 'Find this in the printer’s network settings. Use the printer’s address, not this computer’s.', required: true, placeholder: '192.168.1.100', pattern: '\\S+' }]
+  // SimplyPrint is reached at its own API host, so it asks for account IDs instead of an address.
+  const fields: Field[] = protocol === 'simplyprint' ? [] : [{ key: 'host', label: 'Printer IP address or hostname', hint: 'Find this in the printer’s network settings. Use the printer’s address, not this computer’s.', required: true, placeholder: '192.168.1.100', pattern: '\\S+' }]
   if (protocol === 'bambu_lan') fields.push(
     { key: 'serial_number', label: 'Printer serial number', hint: 'Copy the serial number from the printer’s device information.', required: true, pattern: '[^\\s/+#]+' },
     { key: 'access_code', label: 'LAN access code', hint: 'Find the access code in the printer’s LAN settings.', required: true, type: 'password', pattern: '\\S+' },
@@ -69,6 +73,11 @@ function connectionFields(protocol: string): Field[] {
     { key: 'check_code', label: 'Check code', hint: 'Enable LAN mode in the printer’s network settings to show its check code.', required: true, type: 'password', pattern: '\\S+' },
   )
   if (protocol === 'duet') fields.push({ key: 'password', label: 'Board password (optional)', hint: 'Needed only if a password was set with M551 in the board’s config.g.', type: 'password' })
+  if (protocol === 'simplyprint') fields.push(
+    { key: 'company_id', label: 'SimplyPrint company ID', hint: 'The number after simplyprint.io/ in SimplyPrint’s web address while signed in.', required: true, pattern: '\\d+' },
+    { key: 'printer_id', label: 'SimplyPrint printer ID', hint: 'Open the printer in SimplyPrint; its ID is the number in the address or printer settings.', required: true, pattern: '\\d+' },
+    { key: 'api_key', label: 'SimplyPrint API key', hint: 'Create one in SimplyPrint under account settings, API.', required: true, type: 'password', pattern: '.*\\S.*' },
+  )
   if (protocol === 'prusalink_password') fields.push(
     { key: 'username', label: 'PrusaLink username', hint: 'Use the username shown in the printer’s PrusaLink settings.', placeholder: 'maker' },
     { key: 'password', label: 'PrusaLink password', hint: 'Use the printer’s PrusaLink password, rather than your Mirdain password.', required: true, type: 'password' },
@@ -129,7 +138,7 @@ export function AddPrinter({ state, step, onStep, onBack, onSkip, onSaved }: {
         if (pending) return
         setPending(true); setError('')
         try {
-          const connection: Connection = { ...config, protocol: method.protocol, host: settings.host.trim() }
+          const connection: Connection = { ...config, protocol: method.protocol, host: 'fixedHost' in method ? method.fixedHost : settings.host.trim() }
           if (settings.port) connection.port = Number(settings.port)
           if (protocol === 'bambu_lan' && settings.ftp_port) connection.ftp_port = Number(settings.ftp_port)
           const printer = await saveForwardPrinter(name.trim(), description, presetId, connection)
@@ -146,11 +155,11 @@ export function AddPrinter({ state, step, onStep, onBack, onSkip, onSaved }: {
           <input id={`forward-${field.key}`} type={field.type || 'text'} required={field.required} pattern={field.pattern} placeholder={field.placeholder} autoComplete="off"
             value={settings[field.key] || ''} onChange={event => { setSettings(current => ({ ...current, [field.key]: event.target.value })) }} />
         </div>)}
-        <details className="forward-advanced"><summary>Advanced connection settings</summary>
+        {!('fixedHost' in method) && <details className="forward-advanced"><summary>Advanced connection settings</summary>
           <div className="forward-field"><label htmlFor="forward-port">{protocol === 'bambu_lan' ? 'MQTT port' : 'HTTP port'} (optional)</label>
             <input id="forward-port" type="number" min={1} max={65535} placeholder={method.port} value={settings.port || ''} onChange={event => setSettings(current => ({ ...current, port: event.target.value }))} /></div>
           {protocol === 'bambu_lan' && <div className="forward-field"><label htmlFor="forward-ftp-port">FTPS port (optional)</label><input id="forward-ftp-port" type="number" min={1} max={65535} placeholder="990" value={settings.ftp_port || ''} onChange={event => setSettings(current => ({ ...current, ftp_port: event.target.value }))} /></div>}
-        </details>
+        </details>}
         <div className="forward-step-actions"><button className="button" disabled={pending}>{pending ? 'Saving your printer…' : 'Save printer'}<span aria-hidden="true">→</span></button></div>
       </form>}
       {error && <div className="forward-setup-error" role="alert"><p>{error}</p></div>}

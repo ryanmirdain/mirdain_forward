@@ -13,6 +13,7 @@
 #include "printers/DremelSender.h"
 #include "printers/Esp3dSender.h"
 #include "printers/MksSender.h"
+#include "printers/SimplyPrintSender.h"
 
 #include <stdexcept>
 #include <utility>
@@ -48,6 +49,8 @@ std::unique_ptr<PrinterSender> PrinterSender::create(const QString &protocol)
         return std::make_unique<Esp3dSender>();
     if (protocol == "mks_wifi")
         return std::make_unique<MksSender>();
+    if (protocol == "simplyprint")
+        return std::make_unique<SimplyPrintSender>();
     throw std::runtime_error(("Unsupported printer protocol: " + protocol).toStdString());
 }
 

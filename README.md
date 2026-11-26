@@ -5,7 +5,7 @@ Third-party components retain their respective licenses.
 
 Minimal Qt C++ menu bar / system tray app. It listens on **127.0.0.1:18744**,
 downloads a `.mirdain` archive, and sends the selected slice's **plate 0** to an
-ELEGOO, PrusaLink, Bambu LAN, Klipper (Moonraker), OctoPrint, Flashforge LAN, Creality LAN, Duet (RepRapFirmware), Snapmaker 2.0, UltiMaker S-line, Dremel, ESP3D, or MKS Wi-Fi printer, then requests printing. No queue.
+ELEGOO, PrusaLink, Bambu LAN, Klipper (Moonraker), OctoPrint, Flashforge LAN, Creality LAN, Duet (RepRapFirmware), Snapmaker 2.0, UltiMaker S-line, Dremel, ESP3D, or MKS Wi-Fi printer, or through SimplyPrint's cloud, then requests printing. No queue.
 Printer names, IDs, and settings are saved locally; printer credentials arrive in
 each request.
 
@@ -18,7 +18,7 @@ first layer has begun. Busy printers are not interrupted. Start commands are
 never automatically retried; after an unconfirmed start, check the printer
 before sending again.
 
-ELEGOO, PrusaLink, Moonraker, OctoPrint, Flashforge, Creality, Duet, Snapmaker, UltiMaker, Dremel, ESP3D, and MKS receive the plain `.gcode` inside the native plate package;
+ELEGOO, PrusaLink, Moonraker, OctoPrint, Flashforge, Creality, Duet, Snapmaker, UltiMaker, Dremel, ESP3D, MKS, and SimplyPrint receive the plain `.gcode` inside the native plate package;
 Bambu receives the original `.gcode.3mf`. Temporary downloads are deleted after
 each transfer. Archive members are read without extracting a directory tree.
 Long menu status messages are ellipsized; the tray tooltip retains the full text.
@@ -291,7 +291,7 @@ The menu uses `supportsAutoLevelBed()` and `autoLevelBedEnabled()` to read each
 sender's capabilities and current value, and calls `setAutoLevelBedEnabled()`
 when the user changes it. Capability support belongs to the concrete sender;
 the menu contains no protocol-specific checks. ELEGOO and Bambu support this
-setting, as does Flashforge (`levelingBeforePrint`), while PrusaLink, Moonraker, OctoPrint, Creality, Duet, Snapmaker, UltiMaker, Dremel, ESP3D, and MKS inherit the default unsupported capability.
+setting, as does Flashforge (`levelingBeforePrint`), while PrusaLink, Moonraker, OctoPrint, Creality, Duet, Snapmaker, UltiMaker, Dremel, ESP3D, MKS, and SimplyPrint inherit the default unsupported capability.
 
 `fileFormat()` selects plain G-code or the native plate archive.
 `send(PrinterFile, connection)` creates a temporary `PrinterSendJob` with the
@@ -726,6 +726,19 @@ and `console_port` (TCP G-code console) to 8080; there is no authentication.
 Forward sends `M27` on the console and stops if an SD print is running, posts the
 raw G-code to `/upload?X-Filename=<name>`, then sends `M23 <name>` and `M24`,
 each answered by `ok`. See [FORWARD_SUPPORT.md](FORWARD_SUPPORT.md) for caveats.
+
+### SimplyPrint (`simplyprint`)
+
+```json
+{"protocol":"simplyprint","host":"api.simplyprint.io","company_id":"123","printer_id":"4567","api_key":"YOUR_API_KEY"}
+```
+
+For printers linked to a SimplyPrint account; Forward talks to SimplyPrint's cloud
+API, not the printer. File uploads need the Print Farm plan. Forward checks with
+`printers/Get` that the printer is online and `operational`, uploads to
+`files.simplyprint.io/{company}/files/Upload`, then calls
+`printers/actions/CreateJob` with the returned `file_id`. See
+[FORWARD_SUPPORT.md](FORWARD_SUPPORT.md) for caveats.
 
 `GET http://127.0.0.1:18744/health` returns
 `{"ok":true,"service":"mirdain_forward","version":"…"}` without contacting a

@@ -59,6 +59,7 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/printers/DremelSender.h src/printers/DremelSender.cpp
     src/printers/Esp3dSender.h src/printers/Esp3dSender.cpp
     src/printers/MksSender.h src/printers/MksSender.cpp
+    src/printers/SimplyPrintSender.h src/printers/SimplyPrintSender.cpp
     src/platform/SlicerWindow.h src/platform/SlicerWindow.cpp
     src/platform/ApplicationReopen.h
     src/platform/DragWatcher.h

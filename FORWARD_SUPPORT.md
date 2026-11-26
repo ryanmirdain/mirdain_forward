@@ -25,6 +25,7 @@ open-source client code, compiled, and type-checked only.
 | `dremel_lan` | Dremel 3D45, 3D40 | `src/printers/DremelSender.cpp` | 2026-11-26 |
 | `esp3d` | Volumic, M3D, and other Marlin printers with an ESP3D Wi-Fi module | `src/printers/Esp3dSender.cpp` | 2026-11-26 |
 | `mks_wifi` | CoLiDo, Flying Bear, Two Trees, and other printers with an MKS Robin Wi-Fi module | `src/printers/MksSender.cpp` | 2026-11-26 |
+| `simplyprint` | iQ (TiQ2, TiQ8) and any non-Bambu printer linked to SimplyPrint | `src/printers/SimplyPrintSender.cpp` | 2026-11-26 |
 
 ### Cross-repository work for new protocols
 
@@ -40,7 +41,7 @@ accepted outside this repository:
 - `mirdain_chat_ui/src/printer-presets/CustomPrinterDialog.tsx` (and its vendored
   copies) if the slicer's own printer dialog should offer it.
 
-Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`, `ultimaker_api`, `dremel_lan`, `esp3d`, `mks_wifi`.
+Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`, `ultimaker_api`, `dremel_lan`, `esp3d`, `mks_wifi`, `simplyprint`.
 
 ## Caveats by brand
 
@@ -193,6 +194,20 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`,
   - Upload names keep the original stem (shortened) rather than 8.3 names, as
     OrcaSlicer does; MKS firmware handles long names, but plain Marlin builds
     behind an MKS module may not.
+- **SimplyPrint** (`simplyprint`; iQ TiQ2/TiQ8):
+  - This is a cloud route: the G-code goes to SimplyPrint's servers, not straight
+    to the printer, and needs internet access on both ends.
+  - API file uploads (`files/Upload`) require SimplyPrint's Print Farm plan; an API
+    key requires Pro or an organization.
+  - `connection.host` is SimplyPrint's API host, `api.simplyprint.io` (Add Printer
+    fills it in); uploads go to the matching `files.` host. `company_id`,
+    `printer_id`, and `api_key` are required.
+  - The printer must be online, `operational`, and not awaiting a bed clear.
+    Success is `CreateJob` returning `status: true`; the printer then downloads
+    the file from SimplyPrint, so the print may begin a little later.
+  - SimplyPrint's docs disagree on whether `CreateJob` also needs
+    `select_mode: "file_id"`; Forward sends only `file_id`, as the CreateJob
+    reference specifies.
 
 ## Not supported
 
@@ -395,3 +410,20 @@ a TCP console. The sender follows OrcaSlicer's MKS host (read for protocol only)
    than 0 is a rejection.
 3. After 1.5 seconds, sends `M23 <name>` and `M24` on the console, each waiting
    for `ok`.
+
+### 2026-11-26 · iQ · SimplyPrint cloud API · Implemented
+
+The iQ TiQ2 and TiQ8 presets name the `simplyprint` host type: these printers
+are managed through [SimplyPrint](https://simplyprint.io), whose API is
+[publicly documented](https://apidocs.simplyprint.io/). The sender:
+
+1. `GET https://api.simplyprint.io/{company}/printers/Get?pid={printer}` with
+   `X-API-KEY`; requires `online`, `state` `operational`, and no
+   `awaitingBedClear`.
+2. `POST https://files.simplyprint.io/{company}/files/Upload` (multipart `file`)
+   and reads `file.id`.
+3. `POST https://api.simplyprint.io/{company}/printers/actions/CreateJob?pid=…`
+   with `{"file_id": …}`, succeeding on `status: true`.
+
+The same route works for any printer brand already linked to SimplyPrint, so
+Add Printer offers it for every vendor except Bambu Lab.
