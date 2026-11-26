@@ -37,6 +37,8 @@ const protocols = [
     help: 'Use a Dremel 3D45 or 3D40 on the same network. Find its IP address in the printer’s network settings. The 3D20 has no network connection.' },
   { value: 'esp3d', label: 'ESP3D Wi-Fi module', protocol: 'esp3d', vendors: /^(volumic|m3d|custom)$/i, port: '80',
     help: 'Use a Marlin printer with an ESP3D Wi-Fi module and an SD card inserted. Use the address you open the ESP3D web interface at.' },
+  { value: 'mks_wifi', label: 'MKS Wi-Fi module', protocol: 'mks_wifi', vendors: /^(colido|flyingbear|twotrees|custom)$/i, port: '80',
+    help: 'Use a printer with an MKS Robin Wi-Fi module and an SD card inserted. Find the module’s IP address on the printer’s Wi-Fi screen.' },
   { value: 'moonraker', label: 'Klipper · Moonraker', protocol: 'moonraker', port: '7125',
     vendors: /^(voron|ratrig|sovol|qidi|vzbot|flsun|kingroon|twotrees|mellow|vivedino|positron3d|artillery|custom|elegoo|snapmaker|anycubic)$/i,
     help: 'Use a Klipper printer running Moonraker (Mainsail or Fluidd). Find its IP address in the network settings. Moonraker listens on port 7125; use port 80 if only the Mainsail or Fluidd address is reachable.' },

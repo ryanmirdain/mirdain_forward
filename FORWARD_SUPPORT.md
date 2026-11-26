@@ -24,6 +24,7 @@ open-source client code, compiled, and type-checked only.
 | `ultimaker_api` | UltiMaker S5 (and other S-line printers) | `src/printers/UltimakerSender.cpp` | 2026-11-26 |
 | `dremel_lan` | Dremel 3D45, 3D40 | `src/printers/DremelSender.cpp` | 2026-11-26 |
 | `esp3d` | Volumic, M3D, and other Marlin printers with an ESP3D Wi-Fi module | `src/printers/Esp3dSender.cpp` | 2026-11-26 |
+| `mks_wifi` | CoLiDo, Flying Bear, Two Trees, and other printers with an MKS Robin Wi-Fi module | `src/printers/MksSender.cpp` | 2026-11-26 |
 
 ### Cross-repository work for new protocols
 
@@ -39,7 +40,7 @@ accepted outside this repository:
 - `mirdain_chat_ui/src/printer-presets/CustomPrinterDialog.tsx` (and its vendored
   copies) if the slicer's own printer dialog should offer it.
 
-Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`, `ultimaker_api`, `dremel_lan`, `esp3d`.
+Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`, `ultimaker_api`, `dremel_lan`, `esp3d`, `mks_wifi`.
 
 ## Caveats by brand
 
@@ -181,6 +182,17 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`,
     confirmation. There is no authentication.
   - Only ESP3D 2.x's `/upload_serial` route is used, as in OrcaSlicer; ESP3D 3.x
     setups that store files on the module's own SD card are not supported.
+- **MKS Wi-Fi modules** (`mks_wifi`; CoLiDo, Flying Bear Ghost, Two Trees):
+  - An SD card (or the board's storage) must be present; uploads go through the
+    module and are slow.
+  - The busy check sends `M27` over the TCP console (port 8080, `console_port`).
+    Firmware that does not answer with Marlin's `SD printing byte` text cannot be
+    checked, so a running print could be interrupted.
+  - Success means `M23` and `M24` were each answered with `ok`; there is no
+    further start confirmation. There is no authentication.
+  - Upload names keep the original stem (shortened) rather than 8.3 names, as
+    OrcaSlicer does; MKS firmware handles long names, but plain Marlin builds
+    behind an MKS module may not.
 
 ## Not supported
 
@@ -370,3 +382,16 @@ serial port. The sender follows OrcaSlicer's ESP3D host (read for protocol only)
 1. `GET /command?plain=M27`; a reply containing `SD printing byte` means busy.
 2. `POST /upload_serial` (multipart `file`) with an 8.3 filename.
 3. After 1.5 seconds, `GET /command?plain=M23 <name>` and then `M24`.
+
+### 2026-11-26 · CoLiDo · MKS Wi-Fi · Implemented
+
+CoLiDo's presets name the `mks` host type: an MKS Robin Wi-Fi module (also on
+Flying Bear and Two Trees printers) that accepts uploads over HTTP and G-code over
+a TCP console. The sender follows OrcaSlicer's MKS host (read for protocol only):
+
+1. Opens the TCP console on port 8080 and sends `M27`, refusing when the reply
+   shows an SD print in progress.
+2. `POST /upload?X-Filename=<name>` with the raw G-code body; a JSON `err` other
+   than 0 is a rejection.
+3. After 1.5 seconds, sends `M23 <name>` and `M24` on the console, each waiting
+   for `ok`.
