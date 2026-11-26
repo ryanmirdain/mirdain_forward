@@ -18,6 +18,7 @@ open-source client code, compiled, and type-checked only.
 | `moonraker` | Voron, RatRig, Sovol, Qidi, Vzbot, FLSun, Kingroon, TwoTrees, Mellow, Vivedino, Positron3D, Artillery, ELEGOO Neptune 4, Custom Klipper | `src/printers/MoonrakerSender.cpp` | 2026-11-26 |
 | `octoprint` | Lulzbot, Wanhao, Creality (Ender/CR), Anycubic, Geeetech and any other brand except Bambu Lab, through a USB-attached OctoPrint server | `src/printers/OctoPrintSender.cpp` | 2026-11-26 |
 | `flashforge_lan` | Flashforge Adventurer 5M, 5M Pro, AD5X | `src/printers/FlashforgeSender.cpp` | 2026-11-26 |
+| `creality_lan` | Creality K1, K1C, K1 SE, K1 Max, K2, K2 Plus, K2 Pro (stock firmware) | `src/printers/CrealitySender.cpp` | 2026-11-26 |
 
 ### Cross-repository work for new protocols
 
@@ -33,7 +34,7 @@ accepted outside this repository:
 - `mirdain_chat_ui/src/printer-presets/CustomPrinterDialog.tsx` (and its vendored
   copies) if the slicer's own printer dialog should offer it.
 
-Pending for: `moonraker`, `octoprint`, `flashforge_lan`.
+Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`.
 
 ## Caveats by brand
 
@@ -60,7 +61,7 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`.
     Sidewinder X1/X2/X3 are Marlin.
   - **Kingroon**: KLP1 runs Klipper; KP3S models are Marlin.
   - **Creality**: not offered for Moonraker. Stock K1/K2 firmware does not expose a
-    usable Moonraker without rooting; see Creality below.
+    usable Moonraker without rooting; use `creality_lan` (below).
 
 - **OctoPrint printers** (`octoprint`), the fallback for Marlin brands such as
   Lulzbot, Wanhao, LONGER, Geeetech, Tronxy, Voxelab, Comgrow, and Folgertech:
@@ -90,6 +91,23 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`.
     specification; other states are reported as busy.
   - Auto-leveling follows the saved setting (`levelingBeforePrint`); flow
     calibration, first-layer inspection, and time-lapse are disabled.
+- **Creality** (`creality_lan`):
+  - Only the Wi-Fi models on Creality's Linux firmware (K1 and K2 families, and
+    likely Hi and SPARKX i7) have this interface. Ender, CR, and Sermoon models
+    without networking need OctoPrint.
+  - CFS multi-color: Forward always sends a plain `opGcodeFile` start, so the
+    printer feeds from the spool holder or the currently loaded CFS slot. CFS slot
+    mappings (`colorMatch`/`multiColorPrint`) are not derived from the slice.
+  - The G-code path depends on the model from `/info`: K1-family uses
+    `/usr/data/printer_data/gcodes/`, others `/mnt/UDISK/printer_data/gcodes/`.
+    An unrecognized new K1 variant would get the wrong path and fail to start.
+  - Busy and printing detection use the WebSocket status `state` values (1 printing,
+    5 paused) known from community clients; there is no published specification.
+  - The start has no acknowledgment. Forward reports success when the status
+    turns to printing or, as K1 firmware does after accepting a start, the
+    WebSocket closes. Otherwise it times out after 30 seconds.
+  - No auto-level setting: leveling follows the printer's own start routine and
+    the sliced G-code.
 
 ## Investigation log
 
@@ -146,3 +164,21 @@ clients. The sender:
 
 The legacy port 8899 TCP protocol (`~M601`, `~M28`, `~M29`, `~M23`) used by older
 models is a separate candidate and was not implemented in this entry.
+
+### 2026-11-26 · Creality · Creality Print LAN (HTTP + WebSocket) · Implemented
+
+Creality's networked K1/K2 printers accept uploads at `POST http://host/upload/<name>`
+(multipart field `file`) and take commands as JSON over a WebSocket on port 9999,
+the interface Creality Print uses. There is no public specification; details
+follow OrcaSlicer's CrealityPrint host (read for protocol only, no code copied)
+and community clients. The sender:
+
+1. `GET /info` to read the model and pick the G-code directory.
+2. Opens the WebSocket, asks for status (`reqPrinterPara`), answers `heart_beat`
+   with `ok`, and refuses to send when `state` is 1 or 5.
+3. Uploads the G-code with a unique filename.
+4. Reopens the WebSocket and sends
+   `{"method":"set","params":{"opGcodeFile":"printprt:<path>"}}`, succeeding on a
+   printing status or the K1 post-start disconnect.
+
+Rooted K1/K2 printers that run Moonraker can alternatively use `moonraker`.

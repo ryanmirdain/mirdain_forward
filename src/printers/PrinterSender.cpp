@@ -6,6 +6,7 @@
 #include "printers/MoonrakerSender.h"
 #include "printers/OctoPrintSender.h"
 #include "printers/FlashforgeSender.h"
+#include "printers/CrealitySender.h"
 
 #include <stdexcept>
 #include <utility>
@@ -27,6 +28,8 @@ std::unique_ptr<PrinterSender> PrinterSender::create(const QString &protocol)
         return std::make_unique<OctoPrintSender>();
     if (protocol == "flashforge_lan")
         return std::make_unique<FlashforgeSender>();
+    if (protocol == "creality_lan")
+        return std::make_unique<CrealitySender>();
     throw std::runtime_error(("Unsupported printer protocol: " + protocol).toStdString());
 }
 

@@ -5,7 +5,7 @@ Third-party components retain their respective licenses.
 
 Minimal Qt C++ menu bar / system tray app. It listens on **127.0.0.1:18744**,
 downloads a `.mirdain` archive, and sends the selected slice's **plate 0** to an
-ELEGOO, PrusaLink, Bambu LAN, Klipper (Moonraker), OctoPrint, or Flashforge LAN printer, then requests printing. No queue.
+ELEGOO, PrusaLink, Bambu LAN, Klipper (Moonraker), OctoPrint, Flashforge LAN, or Creality LAN printer, then requests printing. No queue.
 Printer names, IDs, and settings are saved locally; printer credentials arrive in
 each request.
 
@@ -18,7 +18,7 @@ first layer has begun. Busy printers are not interrupted. Start commands are
 never automatically retried; after an unconfirmed start, check the printer
 before sending again.
 
-ELEGOO, PrusaLink, Moonraker, OctoPrint, and Flashforge receive the plain `.gcode` inside the native plate package;
+ELEGOO, PrusaLink, Moonraker, OctoPrint, Flashforge, and Creality receive the plain `.gcode` inside the native plate package;
 Bambu receives the original `.gcode.3mf`. Temporary downloads are deleted after
 each transfer. Archive members are read without extracting a directory tree.
 Long menu status messages are ellipsized; the tray tooltip retains the full text.
@@ -291,7 +291,7 @@ The menu uses `supportsAutoLevelBed()` and `autoLevelBedEnabled()` to read each
 sender's capabilities and current value, and calls `setAutoLevelBedEnabled()`
 when the user changes it. Capability support belongs to the concrete sender;
 the menu contains no protocol-specific checks. ELEGOO and Bambu support this
-setting, as does Flashforge (`levelingBeforePrint`), while PrusaLink, Moonraker, and OctoPrint inherit the default unsupported capability.
+setting, as does Flashforge (`levelingBeforePrint`), while PrusaLink, Moonraker, OctoPrint, and Creality inherit the default unsupported capability.
 
 `fileFormat()` selects plain G-code or the native plate archive.
 `send(PrinterFile, connection)` creates a temporary `PrinterSendJob` with the
@@ -636,6 +636,21 @@ with `printNow: true`. Automatic bed leveling follows the saved printer setting;
 flow calibration, first-layer inspection, time-lapse, and the AD5X material
 station are off. Success requires response `code` 0. See
 [FORWARD_SUPPORT.md](FORWARD_SUPPORT.md) for model caveats.
+
+### Creality LAN (`creality_lan`)
+
+```json
+{"protocol":"creality_lan","host":"10.0.0.226"}
+```
+
+For K1- and K2-family printers on stock firmware. `port` (HTTP, default 80) serves
+`/info` and `/upload/<name>`; `ws_port` (default 9999) is the WebSocket control
+channel. Forward reads the model from `/info` to choose the G-code directory,
+checks the WebSocket status is not printing or paused, uploads, then sends an
+`opGcodeFile` start. The firmware does not acknowledge starts, so success is a
+printing status or the K1 firmware's disconnect after the command; 30 seconds
+without either is a failure. CFS color mapping is not used. See
+[FORWARD_SUPPORT.md](FORWARD_SUPPORT.md) for caveats.
 
 `GET http://127.0.0.1:18744/health` returns
 `{"ok":true,"service":"mirdain_forward","version":"…"}` without contacting a

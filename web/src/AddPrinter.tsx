@@ -34,6 +34,8 @@ const protocols = [
     help: 'Use a Klipper printer running Moonraker (Mainsail or Fluidd). Find its IP address in the network settings. Moonraker listens on port 7125; use port 80 if only the Mainsail or Fluidd address is reachable.' },
   { value: 'flashforge_lan', label: 'Flashforge LAN', protocol: 'flashforge_lan', vendors: /^flashforge$/i, port: '8898',
     help: 'Use an Adventurer 5M, 5M Pro, or AD5X with LAN mode enabled in its network settings, where its IP address, serial number, and check code are shown.' },
+  { value: 'creality_lan', label: 'Creality LAN', protocol: 'creality_lan', vendors: /^creality$/i, port: '80',
+    help: 'Use a Creality K1 or K2 series printer on stock firmware. Find its IP address in the printer’s network settings.' },
   // Any printer OctoPrint can drive over USB; Bambu Lab printers have no USB print connection.
   { value: 'octoprint', label: 'OctoPrint', protocol: 'octoprint', port: '80', vendors: /^(?!bambu|bbl$)/i,
     help: 'Connect the printer to an OctoPrint server (such as OctoPi) over USB. Use the OctoPrint server’s IP address, and create an API key in OctoPrint under Settings > Application Keys.' },
