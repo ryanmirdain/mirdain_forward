@@ -8,6 +8,7 @@
 #include "printers/FlashforgeSender.h"
 #include "printers/CrealitySender.h"
 #include "printers/DuetSender.h"
+#include "printers/SnapmakerSender.h"
 
 #include <stdexcept>
 #include <utility>
@@ -33,6 +34,8 @@ std::unique_ptr<PrinterSender> PrinterSender::create(const QString &protocol)
         return std::make_unique<CrealitySender>();
     if (protocol == "duet")
         return std::make_unique<DuetSender>();
+    if (protocol == "snapmaker_http")
+        return std::make_unique<SnapmakerSender>();
     throw std::runtime_error(("Unsupported printer protocol: " + protocol).toStdString());
 }
 

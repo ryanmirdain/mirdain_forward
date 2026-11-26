@@ -15,11 +15,12 @@ open-source client code, compiled, and type-checked only.
 | `elegoo_sdcp` | ELEGOO (Centauri Carbon and other SDCP printers) | `src/printers/ElegooSender.cpp` | Before this log |
 | `prusalink` | Prusa (MK3.5, MK4/S, MINI, XL, CORE One) | `src/printers/PrusaSender.cpp` | Before this log |
 | `bambu_lan` | Bambu Lab | `src/printers/BambuSender.cpp` | Before this log |
-| `moonraker` | Voron, RatRig, Sovol, Qidi, Vzbot, FLSun, Kingroon, TwoTrees, Mellow, Vivedino, Positron3D, Artillery, ELEGOO Neptune 4, Custom Klipper | `src/printers/MoonrakerSender.cpp` | 2026-11-26 |
+| `moonraker` | Voron, RatRig, Sovol, Qidi, Vzbot, FLSun, Kingroon, TwoTrees, Mellow, Vivedino, Positron3D, Artillery, ELEGOO Neptune 4, Snapmaker U1, Custom Klipper | `src/printers/MoonrakerSender.cpp` | 2026-11-26 |
 | `octoprint` | Lulzbot, Wanhao, Creality (Ender/CR), Anycubic, Geeetech and any other brand except Bambu Lab, through a USB-attached OctoPrint server | `src/printers/OctoPrintSender.cpp` | 2026-11-26 |
 | `flashforge_lan` | Flashforge Adventurer 5M, 5M Pro, AD5X | `src/printers/FlashforgeSender.cpp` | 2026-11-26 |
 | `creality_lan` | Creality K1, K1C, K1 SE, K1 Max, K2, K2 Plus, K2 Pro (stock firmware) | `src/printers/CrealitySender.cpp` | 2026-11-26 |
 | `duet` | SeeMeCNC, Meltingplot, CONSTRUCT3D, Vivedino Troodon (RRF), RatRig (Duet builds), Custom RRF | `src/printers/DuetSender.cpp` | 2026-11-26 |
+| `snapmaker_http` | Snapmaker 2.0 A150, A250, A350 (U1 through `moonraker`) | `src/printers/SnapmakerSender.cpp` | 2026-11-26 |
 
 ### Cross-repository work for new protocols
 
@@ -35,7 +36,7 @@ accepted outside this repository:
 - `mirdain_chat_ui/src/printer-presets/CustomPrinterDialog.tsx` (and its vendored
   copies) if the slicer's own printer dialog should offer it.
 
-Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`.
+Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`.
 
 ## Caveats by brand
 
@@ -125,6 +126,21 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`.
     methods are offered, Moonraker first.
   - **SeeMeCNC**: older RostockMAX v3.2 boards (RAMBo/Marlin) are not Duet; use
     OctoPrint for those.
+- **Snapmaker** (`snapmaker_http`, and `moonraker` for the U1):
+  - Each new connection token must be approved on the touchscreen within 60
+    seconds. Forward keeps the approved token in memory for the printer, so
+    approval is needed again after Forward restarts or the printer forgets it.
+    A known token can be supplied as `connection.token` to skip the prompt.
+  - Only 3D printing (`type=3DP`) is sent; laser and CNC modules are out of scope,
+    and the printer must have the 3D printing head attached.
+  - `start_print` returning HTTP 200 is treated as success; the API returns no
+    further confirmation. Idle means status `IDLE`, `FINISHED`, or `STOPPED`.
+  - The endpoints follow Snapmaker Luban and community clients; Snapmaker does not
+    publish this API. Dual-extruder (A250/A350 Dual) prints use whatever tool the
+    sliced G-code selects.
+  - **J1 and Artisan** are not supported: they use Snapmaker's binary SACP protocol
+    instead of the HTTP API. See the investigation log.
+  - **U1** runs Klipper; use `moonraker`.
 
 ## Investigation log
 
@@ -215,3 +231,19 @@ CONSTRUCT3D name the `duet` host type. RepRapFirmware's HTTP API is documented
    `PUT /machine/file/…`.
 4. Sends `M32 "0:/gcodes/<file>"` through `rr_gcode` or `POST /machine/code`, then
    polls status once a second until it reads `processing`.
+
+### 2026-11-26 · Snapmaker · Snapmaker 2.0 HTTP API · Implemented (A-series)
+
+The Snapmaker 2.0 A-series serves an HTTP API on port 8080, as used by Snapmaker
+Luban and Cura's Snapmaker plugin. The sender:
+
+1. Reuses an approved token, or `POST /api/v1/connect` for a new one and polls
+   `GET /api/v1/status?token=…` every 2 seconds (204 awaiting approval, 401
+   declined, 200 approved) for up to 60 seconds.
+2. Requires `status` `IDLE`, `FINISHED`, or `STOPPED`.
+3. `POST /api/v1/prepare_print` (multipart `token`, `type=3DP`, `file`), then
+   `POST /api/v1/start_print` with the token.
+
+The Snapmaker U1 is a Klipper printer and was added to the Moonraker vendors. The
+J1 and Artisan use SACP, a binary protocol over TCP that Luban implements but
+Snapmaker does not document; it is left as a separate candidate.

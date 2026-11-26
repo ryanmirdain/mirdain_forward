@@ -5,7 +5,7 @@ Third-party components retain their respective licenses.
 
 Minimal Qt C++ menu bar / system tray app. It listens on **127.0.0.1:18744**,
 downloads a `.mirdain` archive, and sends the selected slice's **plate 0** to an
-ELEGOO, PrusaLink, Bambu LAN, Klipper (Moonraker), OctoPrint, Flashforge LAN, Creality LAN, or Duet (RepRapFirmware) printer, then requests printing. No queue.
+ELEGOO, PrusaLink, Bambu LAN, Klipper (Moonraker), OctoPrint, Flashforge LAN, Creality LAN, Duet (RepRapFirmware), or Snapmaker 2.0 printer, then requests printing. No queue.
 Printer names, IDs, and settings are saved locally; printer credentials arrive in
 each request.
 
@@ -18,7 +18,7 @@ first layer has begun. Busy printers are not interrupted. Start commands are
 never automatically retried; after an unconfirmed start, check the printer
 before sending again.
 
-ELEGOO, PrusaLink, Moonraker, OctoPrint, Flashforge, Creality, and Duet receive the plain `.gcode` inside the native plate package;
+ELEGOO, PrusaLink, Moonraker, OctoPrint, Flashforge, Creality, Duet, and Snapmaker receive the plain `.gcode` inside the native plate package;
 Bambu receives the original `.gcode.3mf`. Temporary downloads are deleted after
 each transfer. Archive members are read without extracting a directory tree.
 Long menu status messages are ellipsized; the tray tooltip retains the full text.
@@ -291,7 +291,7 @@ The menu uses `supportsAutoLevelBed()` and `autoLevelBedEnabled()` to read each
 sender's capabilities and current value, and calls `setAutoLevelBedEnabled()`
 when the user changes it. Capability support belongs to the concrete sender;
 the menu contains no protocol-specific checks. ELEGOO and Bambu support this
-setting, as does Flashforge (`levelingBeforePrint`), while PrusaLink, Moonraker, OctoPrint, Creality, and Duet inherit the default unsupported capability.
+setting, as does Flashforge (`levelingBeforePrint`), while PrusaLink, Moonraker, OctoPrint, Creality, Duet, and Snapmaker inherit the default unsupported capability.
 
 `fileFormat()` selects plain G-code or the native plate archive.
 `send(PrinterFile, connection)` creates a temporary `PrinterSendJob` with the
@@ -664,6 +664,19 @@ standalone `rr_connect` and falls back to an SBC's `/machine/connect`, requires
 `state.status` to be `idle`, uploads to `0:/gcodes/`, sends `M32`, then polls the
 status until it reads `processing` (up to 20 seconds). See
 [FORWARD_SUPPORT.md](FORWARD_SUPPORT.md) for caveats.
+
+### Snapmaker 2.0 (`snapmaker_http`)
+
+```json
+{"protocol":"snapmaker_http","host":"10.0.0.228"}
+```
+
+For the A150, A250, and A350. The port defaults to 8080. Without a token, Forward
+requests one with `/api/v1/connect` and waits up to 60 seconds for it to be
+approved on the touchscreen; the approved token is kept in memory for later sends,
+or can be given as `token`. Forward requires an idle status, uploads with
+`/api/v1/prepare_print` (`type=3DP`), and succeeds when `/api/v1/start_print`
+returns HTTP 200. See [FORWARD_SUPPORT.md](FORWARD_SUPPORT.md) for caveats.
 
 `GET http://127.0.0.1:18744/health` returns
 `{"ok":true,"service":"mirdain_forward","version":"…"}` without contacting a
