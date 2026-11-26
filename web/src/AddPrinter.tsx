@@ -31,6 +31,8 @@ const protocols = [
     help: 'Enable LAN Only mode on your Bambu printer, and Developer Mode if required by its firmware. Find the IP address, serial number, and LAN access code in the printer’s settings.' },
   { value: 'snapmaker_http', label: 'Snapmaker 2.0 Wi-Fi', protocol: 'snapmaker_http', vendors: /^snapmaker$/i, port: '8080',
     help: 'Use a Snapmaker 2.0 (A150, A250, or A350) on the same network. On the first print, approve Mirdain Forward on the printer’s touchscreen. For the Snapmaker U1, choose Klipper · Moonraker.' },
+  { value: 'ultimaker_api', label: 'UltiMaker local API', protocol: 'ultimaker_api', vendors: /^ultimaker$/i, port: '80',
+    help: 'Use an UltiMaker S3, S5, or S7 on the same network. On the first print, allow Mirdain Forward on the printer’s touchscreen. UltiMaker 2 series printers have no network connection; use OctoPrint.' },
   { value: 'moonraker', label: 'Klipper · Moonraker', protocol: 'moonraker', port: '7125',
     vendors: /^(voron|ratrig|sovol|qidi|vzbot|flsun|kingroon|twotrees|mellow|vivedino|positron3d|artillery|custom|elegoo|snapmaker)$/i,
     help: 'Use a Klipper printer running Moonraker (Mainsail or Fluidd). Find its IP address in the network settings. Moonraker listens on port 7125; use port 80 if only the Mainsail or Fluidd address is reachable.' },

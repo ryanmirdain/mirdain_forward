@@ -23,7 +23,7 @@ export type AppState = {
   slicerUrl: string
 }
 export type Membership = { id: number; name: string; role: string; accepted: boolean }
-export type Connection = { protocol: 'elegoo_sdcp' | 'prusalink' | 'bambu_lan' | 'moonraker' | 'octoprint' | 'flashforge_lan' | 'creality_lan' | 'duet' | 'snapmaker_http'; host: string; [key: string]: string | number }
+export type Connection = { protocol: 'elegoo_sdcp' | 'prusalink' | 'bambu_lan' | 'moonraker' | 'octoprint' | 'flashforge_lan' | 'creality_lan' | 'duet' | 'snapmaker_http' | 'ultimaker_api'; host: string; [key: string]: string | number }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response

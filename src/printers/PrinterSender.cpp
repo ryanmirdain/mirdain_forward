@@ -9,6 +9,7 @@
 #include "printers/CrealitySender.h"
 #include "printers/DuetSender.h"
 #include "printers/SnapmakerSender.h"
+#include "printers/UltimakerSender.h"
 
 #include <stdexcept>
 #include <utility>
@@ -36,6 +37,8 @@ std::unique_ptr<PrinterSender> PrinterSender::create(const QString &protocol)
         return std::make_unique<DuetSender>();
     if (protocol == "snapmaker_http")
         return std::make_unique<SnapmakerSender>();
+    if (protocol == "ultimaker_api")
+        return std::make_unique<UltimakerSender>();
     throw std::runtime_error(("Unsupported printer protocol: " + protocol).toStdString());
 }
 

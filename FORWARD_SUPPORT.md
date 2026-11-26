@@ -21,6 +21,7 @@ open-source client code, compiled, and type-checked only.
 | `creality_lan` | Creality K1, K1C, K1 SE, K1 Max, K2, K2 Plus, K2 Pro (stock firmware) | `src/printers/CrealitySender.cpp` | 2026-11-26 |
 | `duet` | SeeMeCNC, Meltingplot, CONSTRUCT3D, Vivedino Troodon (RRF), RatRig (Duet builds), Custom RRF | `src/printers/DuetSender.cpp` | 2026-11-26 |
 | `snapmaker_http` | Snapmaker 2.0 A150, A250, A350 (U1 through `moonraker`) | `src/printers/SnapmakerSender.cpp` | 2026-11-26 |
+| `ultimaker_api` | UltiMaker S5 (and other S-line printers) | `src/printers/UltimakerSender.cpp` | 2026-11-26 |
 
 ### Cross-repository work for new protocols
 
@@ -36,7 +37,7 @@ accepted outside this repository:
 - `mirdain_chat_ui/src/printer-presets/CustomPrinterDialog.tsx` (and its vendored
   copies) if the slicer's own printer dialog should offer it.
 
-Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`.
+Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`, `ultimaker_api`.
 
 ## Caveats by brand
 
@@ -141,6 +142,20 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`,
   - **J1 and Artisan** are not supported: they use Snapmaker's binary SACP protocol
     instead of the HTTP API. See the investigation log.
   - **U1** runs Klipper; use `moonraker`.
+- **UltiMaker** (`ultimaker_api`):
+  - Forward must be allowed once on the touchscreen within 60 seconds. The
+    approved id and key are kept in memory, so approval is needed again after
+    Forward restarts unless `auth_id` and `auth_key` are supplied.
+  - The printer must be `idle`. After a finished print it waits for the build
+    plate to be cleared and confirmed on the touchscreen; until then it is busy.
+  - The G-code needs the Griffin header, which the Orca S5 preset writes. Material
+    and print-core checks are the printer's own: a mismatch with the loaded
+    material is shown on the touchscreen and may need confirmation before
+    printing starts.
+  - HTTP 201 for the print job is the only confirmation; Forward does not poll
+    the job afterwards.
+  - **UltiMaker 2, 2+, 2 Extended+** have no network interface (the 2+ Connect is
+    not in the presets); use OctoPrint, which is still offered for UltiMaker.
 
 ## Investigation log
 
@@ -247,3 +262,15 @@ Luban and Cura's Snapmaker plugin. The sender:
 The Snapmaker U1 is a Klipper printer and was added to the Moonraker vendors. The
 J1 and Artisan use SACP, a binary protocol over TCP that Luban implements but
 Snapmaker does not document; it is left as a separate candidate.
+
+### 2026-11-26 · UltiMaker · S-line local HTTP API · Implemented
+
+The S-line's local API (`/api/v1`, documented on the printer at `/docs/api/`)
+is what Cura uses on the LAN. The sender:
+
+1. Verifies remembered credentials with `GET /api/v1/auth/verify` (Digest), or
+   requests new ones with `POST /api/v1/auth/request` and polls
+   `GET /api/v1/auth/check/<id>` until `authorized` (60 seconds at most).
+2. Requires `GET /api/v1/printer/status` to be `"idle"`.
+3. `POST /api/v1/print_job` (multipart `file`, Digest auth), succeeding on HTTP 2xx;
+   the printer starts the job itself.
