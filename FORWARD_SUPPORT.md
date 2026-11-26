@@ -15,7 +15,7 @@ open-source client code, compiled, and type-checked only.
 | `elegoo_sdcp` | ELEGOO (Centauri Carbon and other SDCP printers) | `src/printers/ElegooSender.cpp` | Before this log |
 | `prusalink` | Prusa (MK3.5, MK4/S, MINI, XL, CORE One) | `src/printers/PrusaSender.cpp` | Before this log |
 | `bambu_lan` | Bambu Lab | `src/printers/BambuSender.cpp` | Before this log |
-| `moonraker` | Voron, RatRig, Sovol, Qidi, Vzbot, FLSun, Kingroon, TwoTrees, Mellow, Vivedino, Positron3D, Artillery, ELEGOO Neptune 4, Snapmaker U1, Custom Klipper | `src/printers/MoonrakerSender.cpp` | 2026-11-26 |
+| `moonraker` | Voron, RatRig, Sovol, Qidi, Vzbot, FLSun, Kingroon, TwoTrees, Mellow, Vivedino, Positron3D, Artillery, ELEGOO Neptune 4, Snapmaker U1, Anycubic with Rinkhals, Custom Klipper | `src/printers/MoonrakerSender.cpp` | 2026-11-26 |
 | `octoprint` | Lulzbot, Wanhao, Creality (Ender/CR), Anycubic, Geeetech and any other brand except Bambu Lab, through a USB-attached OctoPrint server | `src/printers/OctoPrintSender.cpp` | 2026-11-26 |
 | `flashforge_lan` | Flashforge Adventurer 5M, 5M Pro, AD5X | `src/printers/FlashforgeSender.cpp` | 2026-11-26 |
 | `creality_lan` | Creality K1, K1C, K1 SE, K1 Max, K2, K2 Plus, K2 Pro (stock firmware) | `src/printers/CrealitySender.cpp` | 2026-11-26 |
@@ -23,6 +23,7 @@ open-source client code, compiled, and type-checked only.
 | `snapmaker_http` | Snapmaker 2.0 A150, A250, A350 (U1 through `moonraker`) | `src/printers/SnapmakerSender.cpp` | 2026-11-26 |
 | `ultimaker_api` | UltiMaker S5 (and other S-line printers) | `src/printers/UltimakerSender.cpp` | 2026-11-26 |
 | `dremel_lan` | Dremel 3D45, 3D40 | `src/printers/DremelSender.cpp` | 2026-11-26 |
+| `esp3d` | Volumic, M3D, and other Marlin printers with an ESP3D Wi-Fi module | `src/printers/Esp3dSender.cpp` | 2026-11-26 |
 
 ### Cross-repository work for new protocols
 
@@ -38,7 +39,7 @@ accepted outside this repository:
 - `mirdain_chat_ui/src/printer-presets/CustomPrinterDialog.tsx` (and its vendored
   copies) if the slicer's own printer dialog should offer it.
 
-Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`, `ultimaker_api`, `dremel_lan`.
+Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`, `ultimaker_api`, `dremel_lan`, `esp3d`.
 
 ## Caveats by brand
 
@@ -168,12 +169,25 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`,
     status turning `busy` or the job `building`/`preparing` within 20 seconds.
   - The protocol follows the community `dremel3dpy` library; Dremel does not
     publish it.
+- **ESP3D Wi-Fi modules** (`esp3d`; Volumic, M3D):
+  - An SD card must be in the printer: ESP3D streams the upload over serial onto
+    it (`/upload_serial`), which is slow for large files.
+  - Files get generated 8.3 names (`MFxxxxxx.GCO`), because longer names can crash
+    Marlin's SD support through ESP3D.
+  - The busy check sends `M27`. ESP3D versions that do not relay the printer's
+    reply cannot detect a running print, so on those Forward cannot avoid
+    interrupting one; only send when the printer is idle.
+  - Success means `M23` and `M24` were delivered; ESP3D gives no start
+    confirmation. There is no authentication.
+  - Only ESP3D 2.x's `/upload_serial` route is used, as in OrcaSlicer; ESP3D 3.x
+    setups that store files on the module's own SD card are not supported.
 
 ## Not supported
 
 | Brand | Protocol investigated | Reason | Logged |
 | --- | --- | --- | --- |
 | Raise3D (Pro3, Pro3 Plus) | Raise3D Remote Access API (port 10800) | Upload and start-job endpoints are documented only on the printer itself; not confirmable without hardware | 2026-11-26 |
+| Anycubic (Kobra 3, S1, Kobra 2 series) | Stock LAN mode (local MQTT over TLS) | Undocumented; credentials come from Anycubic Slicer Next and payloads are model-specific | 2026-11-26 |
 
 ## Investigation log
 
@@ -327,3 +341,32 @@ Dremel integration). The sender:
 3. Posts `PRINT=<name>`, fails on an `error_code` other than 200, then polls
    `GETPRINTERSTATUS` once a second until the job is `building` or `preparing`
    or the printer is `busy`.
+
+### 2026-11-26 · Anycubic · Stock LAN mode · Not supported yet
+
+Recent Kobra 3 and Kobra S1 firmware has a LAN mode that turns off the cloud and
+lets Anycubic Slicer Next send prints locally
+([Anycubic's LAN guide](https://wiki.anycubic.com/en/fdm-3d-printer/kobra-s1-max-combo/lan-connection-guide)).
+Anycubic does not document the protocol. Community Home Assistant integrations
+show it is MQTT over TLS on the printer, with credentials that clients take from
+Anycubic Slicer Next's local data, plus an HTTP upload. Their authors note that
+models besides the ones they own are untested. Without a specification or a
+printer, the credential source, topics, and start payload could not be confirmed,
+so no sender was written.
+
+What works today:
+- **Kobra 2/3/S1 with [Rinkhals](https://jbatonnet.github.io/Rinkhals/)** (community
+  firmware) expose Moonraker; Anycubic is offered `moonraker` in Add Printer from
+  the next commit on.
+- **Marlin models** (i3 Mega, Vyper, Chiron, 4Max, original Kobra) print through
+  OctoPrint over USB.
+
+### 2026-11-26 · Volumic and M3D · ESP3D · Implemented
+
+Volumic (6 presets) and M3D (2) name the `esp3d` host type: an ESP8266/ESP32 module
+running [ESP3D](https://github.com/luc-github/ESP3D) bridges Wi-Fi to the printer's
+serial port. The sender follows OrcaSlicer's ESP3D host (read for protocol only):
+
+1. `GET /command?plain=M27`; a reply containing `SD printing byte` means busy.
+2. `POST /upload_serial` (multipart `file`) with an 8.3 filename.
+3. After 1.5 seconds, `GET /command?plain=M23 <name>` and then `M24`.

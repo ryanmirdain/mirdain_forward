@@ -11,6 +11,7 @@
 #include "printers/SnapmakerSender.h"
 #include "printers/UltimakerSender.h"
 #include "printers/DremelSender.h"
+#include "printers/Esp3dSender.h"
 
 #include <stdexcept>
 #include <utility>
@@ -42,6 +43,8 @@ std::unique_ptr<PrinterSender> PrinterSender::create(const QString &protocol)
         return std::make_unique<UltimakerSender>();
     if (protocol == "dremel_lan")
         return std::make_unique<DremelSender>();
+    if (protocol == "esp3d")
+        return std::make_unique<Esp3dSender>();
     throw std::runtime_error(("Unsupported printer protocol: " + protocol).toStdString());
 }
 
