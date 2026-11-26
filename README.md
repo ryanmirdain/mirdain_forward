@@ -5,7 +5,7 @@ Third-party components retain their respective licenses.
 
 Minimal Qt C++ menu bar / system tray app. It listens on **127.0.0.1:18744**,
 downloads a `.mirdain` archive, and sends the selected slice's **plate 0** to an
-ELEGOO, PrusaLink, Bambu LAN, or Klipper (Moonraker) printer, then requests printing. No queue.
+ELEGOO, PrusaLink, Bambu LAN, Klipper (Moonraker), or OctoPrint printer, then requests printing. No queue.
 Printer names, IDs, and settings are saved locally; printer credentials arrive in
 each request.
 
@@ -18,7 +18,7 @@ first layer has begun. Busy printers are not interrupted. Start commands are
 never automatically retried; after an unconfirmed start, check the printer
 before sending again.
 
-ELEGOO, PrusaLink, and Moonraker receive the plain `.gcode` inside the native plate package;
+ELEGOO, PrusaLink, Moonraker, and OctoPrint receive the plain `.gcode` inside the native plate package;
 Bambu receives the original `.gcode.3mf`. Temporary downloads are deleted after
 each transfer. Archive members are read without extracting a directory tree.
 Long menu status messages are ellipsized; the tray tooltip retains the full text.
@@ -291,7 +291,7 @@ The menu uses `supportsAutoLevelBed()` and `autoLevelBedEnabled()` to read each
 sender's capabilities and current value, and calls `setAutoLevelBedEnabled()`
 when the user changes it. Capability support belongs to the concrete sender;
 the menu contains no protocol-specific checks. ELEGOO and Bambu support this
-setting, while PrusaLink and Moonraker inherit the default unsupported capability.
+setting, while PrusaLink, Moonraker, and OctoPrint inherit the default unsupported capability.
 
 `fileFormat()` selects plain G-code or the native plate archive.
 `send(PrinterFile, connection)` creates a temporary `PrinterSendJob` with the
@@ -608,6 +608,20 @@ so a send never overwrites an existing file. Success requires Moonraker's
 the sliced G-code and the printer's macros. See
 [FORWARD_SUPPORT.md](FORWARD_SUPPORT.md) for brand caveats and
 [Moonraker's file upload API](https://moonraker.readthedocs.io/en/latest/web_api/#file-upload).
+
+### OctoPrint (`octoprint`)
+
+```json
+{"protocol":"octoprint","host":"10.0.0.224","api_key":"YOUR_API_KEY"}
+```
+
+The port defaults to 80 and `api_key` is required. Forward checks the key with
+`/api/version`, requires `/api/printer` to report an operational, ready, idle
+printer (HTTP 409 means OctoPrint is not connected to it), then uploads to `local`
+storage with `select=true` and `print=true`. Upload names keep at most 48
+characters of the original stem plus a short UUID. Success requires the upload
+response's `effectivePrint`. Leveling follows the sliced G-code. See
+[OctoPrint's file operations API](https://docs.octoprint.org/en/master/api/files.html#upload-file-or-create-folder).
 
 `GET http://127.0.0.1:18744/health` returns
 `{"ok":true,"service":"mirdain_forward","version":"…"}` without contacting a

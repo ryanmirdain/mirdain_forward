@@ -16,6 +16,7 @@ open-source client code, compiled, and type-checked only.
 | `prusalink` | Prusa (MK3.5, MK4/S, MINI, XL, CORE One) | `src/printers/PrusaSender.cpp` | Before this log |
 | `bambu_lan` | Bambu Lab | `src/printers/BambuSender.cpp` | Before this log |
 | `moonraker` | Voron, RatRig, Sovol, Qidi, Vzbot, FLSun, Kingroon, TwoTrees, Mellow, Vivedino, Positron3D, Artillery, ELEGOO Neptune 4, Custom Klipper | `src/printers/MoonrakerSender.cpp` | 2026-11-26 |
+| `octoprint` | Lulzbot, Wanhao, Creality (Ender/CR), Anycubic, Geeetech and any other brand except Bambu Lab, through a USB-attached OctoPrint server | `src/printers/OctoPrintSender.cpp` | 2026-11-26 |
 
 ### Cross-repository work for new protocols
 
@@ -31,7 +32,7 @@ accepted outside this repository:
 - `mirdain_chat_ui/src/printer-presets/CustomPrinterDialog.tsx` (and its vendored
   copies) if the slicer's own printer dialog should offer it.
 
-Pending for: `moonraker`.
+Pending for: `moonraker`, `octoprint`.
 
 ## Caveats by brand
 
@@ -60,6 +61,19 @@ Pending for: `moonraker`.
   - **Creality**: not offered for Moonraker. Stock K1/K2 firmware does not expose a
     usable Moonraker without rooting; see Creality below.
 
+- **OctoPrint printers** (`octoprint`), the fallback for Marlin brands such as
+  Lulzbot, Wanhao, LONGER, Geeetech, Tronxy, Voxelab, Comgrow, and Folgertech:
+  - Requires a separate OctoPrint server (usually a Raspberry Pi running OctoPi)
+    connected to the printer over USB and to the printer in OctoPrint's UI. Forward
+    reports a failure when OctoPrint is not connected to the printer; it never
+    opens the serial connection itself.
+  - G-code streams over USB serial, so print quality on fast printers depends on
+    the host; this is OctoPrint's limitation, not Forward's.
+  - An API key is required. Leveling follows the sliced start G-code.
+  - Offered for every vendor except Bambu Lab, including brands with a native
+    protocol (Prusa, ELEGOO, Klipper brands), where it is listed after the native
+    method.
+
 ## Investigation log
 
 One brand and protocol per entry, newest last.
@@ -82,3 +96,19 @@ The sender:
 An optional `api_key` is sent as `X-Api-Key`. The same sender covers every
 Klipper brand listed above. Add Printer now picks connection methods from a table
 of vendors, so ELEGOO offers both SDCP and Moonraker.
+
+### 2026-11-26 · Lulzbot (and other Marlin printers) · OctoPrint · Implemented
+
+Lulzbot's TAZ and Mini printers, like most Marlin brands in the preset catalog
+(Wanhao, LONGER, Geeetech, Tronxy, older Creality and Anycubic), have no network
+interface of their own; Orca's presets for 123 machines name `octoprint` as the
+host type. OctoPrint's REST API is documented
+([files](https://docs.octoprint.org/en/master/api/files.html),
+[printer](https://docs.octoprint.org/en/master/api/printer.html)). The sender:
+
+1. `GET /api/version` with `X-Api-Key` to check the server and key.
+2. `GET /api/printer` and requires the `operational` and `ready` flags without
+   `printing`, `paused`, `pausing`, `cancelling`, or `error`; HTTP 409 means
+   OctoPrint is not connected to the printer.
+3. `POST /api/files/local` (multipart, `select=true`, `print=true`) with a unique
+   filename, and succeeds only when the response's `effectivePrint` is true.

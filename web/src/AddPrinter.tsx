@@ -32,6 +32,9 @@ const protocols = [
   { value: 'moonraker', label: 'Klipper · Moonraker', protocol: 'moonraker', port: '7125',
     vendors: /^(voron|ratrig|sovol|qidi|vzbot|flsun|kingroon|twotrees|mellow|vivedino|positron3d|artillery|custom|elegoo)$/i,
     help: 'Use a Klipper printer running Moonraker (Mainsail or Fluidd). Find its IP address in the network settings. Moonraker listens on port 7125; use port 80 if only the Mainsail or Fluidd address is reachable.' },
+  // Any printer OctoPrint can drive over USB; Bambu Lab printers have no USB print connection.
+  { value: 'octoprint', label: 'OctoPrint', protocol: 'octoprint', port: '80', vendors: /^(?!bambu|bbl$)/i,
+    help: 'Connect the printer to an OctoPrint server (such as OctoPi) over USB. Use the OctoPrint server’s IP address, and create an API key in OctoPrint under Settings > Application Keys.' },
 ] as const
 const supportsVendor = (vendor: string) => protocols.some(item => item.vendors.test(vendor))
 
@@ -43,6 +46,7 @@ function connectionFields(protocol: string): Field[] {
   )
   if (protocol === 'prusalink_api') fields.push({ key: 'api_key', label: 'PrusaLink API key', hint: 'Open PrusaLink in your browser and copy its API key from Settings.', required: true, type: 'password', pattern: '.*\\S.*' })
   if (protocol === 'moonraker') fields.push({ key: 'api_key', label: 'Moonraker API key (optional)', hint: 'Needed only when Moonraker requires authorization and does not trust this computer’s address. Find it in Mainsail or Fluidd’s settings.', type: 'password' })
+  if (protocol === 'octoprint') fields.push({ key: 'api_key', label: 'OctoPrint API key', hint: 'Create one in OctoPrint under Settings > Application Keys.', required: true, type: 'password', pattern: '.*\\S.*' })
   if (protocol === 'prusalink_password') fields.push(
     { key: 'username', label: 'PrusaLink username', hint: 'Use the username shown in the printer’s PrusaLink settings.', placeholder: 'maker' },
     { key: 'password', label: 'PrusaLink password', hint: 'Use the printer’s PrusaLink password, rather than your Mirdain password.', required: true, type: 'password' },
