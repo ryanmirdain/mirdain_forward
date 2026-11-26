@@ -26,6 +26,7 @@ open-source client code, compiled, and type-checked only.
 | `esp3d` | Volumic, M3D, and other Marlin printers with an ESP3D Wi-Fi module | `src/printers/Esp3dSender.cpp` | 2026-11-26 |
 | `mks_wifi` | CoLiDo, Flying Bear, Two Trees, and other printers with an MKS Robin Wi-Fi module | `src/printers/MksSender.cpp` | 2026-11-26 |
 | `simplyprint` | iQ (TiQ2, TiQ8) and any non-Bambu printer linked to SimplyPrint | `src/printers/SimplyPrintSender.cpp` | 2026-11-26 |
+| `flashforge_legacy` | Flashforge Adventurer 3/4, Guider, Creator, Artemis | `src/printers/FlashforgeLegacySender.cpp` | 2026-11-26 |
 
 ### Cross-repository work for new protocols
 
@@ -41,7 +42,7 @@ accepted outside this repository:
 - `mirdain_chat_ui/src/printer-presets/CustomPrinterDialog.tsx` (and its vendored
   copies) if the slicer's own printer dialog should offer it.
 
-Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`, `ultimaker_api`, `dremel_lan`, `esp3d`, `mks_wifi`, `simplyprint`.
+Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`, `ultimaker_api`, `dremel_lan`, `esp3d`, `mks_wifi`, `simplyprint`, `flashforge_legacy`.
 
 ## Caveats by brand
 
@@ -89,10 +90,8 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`,
     `gcodeToolCnt=0`, and an empty material mapping, so prints are single-filament.
     Multi-color AD5X prints are not supported; slot mappings are not derived from
     the slice.
-  - Only the newer HTTP API (port 8898) is implemented. Adventurer 3/4, Guider,
-    Creator, and Artemis models that only speak Flashforge's legacy TCP G-code
-    protocol on port 8899 are not supported natively; use OctoPrint where the
-    printer allows USB printing.
+  - The HTTP API (port 8898) covers the Adventurer 5M series and AD5X. Older
+    Adventurer 3/4, Guider, Creator, and Artemis models use `flashforge_legacy`.
   - Busy detection uses `/detail` status strings `ready`, `completed`, and
     `cancel` as idle. These come from community clients, not a published
     specification; other states are reported as busy.
@@ -207,7 +206,17 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`,
     the file from SimplyPrint, so the print may begin a little later.
   - SimplyPrint's docs disagree on whether `CreateJob` also needs
     `select_mode: "file_id"`; Forward sends only `file_id`, as the CreateJob
-    reference specifies.
+    reference specifies.- **Flashforge legacy** (`flashforge_legacy`; Adventurer 3/4, Guider, Creator, Artemis):
+  - The G-code is streamed as raw 4 KiB writes after `~M28`, as OrcaSlicer does.
+    FlashPrint itself wraps data in framed packets on some firmware; printers that
+    require that framing will reject or corrupt the upload. This is the largest
+    risk in this sender.
+  - Busy detection requires `MachineStatus: READY` in the `~M119` reply.
+  - The printer takes control only after `~M601 S1`; FlashPrint or another client
+    holding the connection can block Forward.
+  - Success is `ok` to `~M23`; there is no further start confirmation and no
+    authentication. Uploads are slow over the console.
+
 - **Other Klipper brands** (`moonraker`, offered from 2026-11-26 because their
   Orca presets target Klipper): BIQU Hurakan, BLOCKS, Chuanying X1, Co Print
   ChromaSet, CoLiDo DIY 4.0/SR1, Comgrow T300/T500, Cubicon xCeler, DeltaMaker,
@@ -484,3 +493,14 @@ Every remaining vendor in the preset catalog was classified by the resolved
 
 No sender was added in this entry, so it is part of a mapping commit rather than a
 new type.
+
+### 2026-11-26 · Flashforge (older models) · Legacy TCP console · Implemented
+
+Older Flashforge printers speak FlashPrint's G-code console on TCP port 8899, with
+`~`-prefixed commands answered by `ok`. The sender follows OrcaSlicer's
+Flashforge serial path (read for protocol only):
+
+1. `~M601 S1` (take control), `~M650` (legacy session), `~M119`, requiring
+   `MachineStatus: READY`.
+2. `~M28 <size> 0:/user/<name>`, then the G-code in raw 4 KiB writes.
+3. After 3 seconds, `~M29` to save, then `~M23 0:/user/<name>` to print.

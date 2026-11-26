@@ -45,6 +45,8 @@ const protocols = [
     help: 'Use a Klipper printer running Moonraker (Mainsail or Fluidd). Find its IP address in the network settings. Moonraker listens on port 7125; use port 80 if only the Mainsail or Fluidd address is reachable.' },
   { value: 'flashforge_lan', label: 'Flashforge LAN', protocol: 'flashforge_lan', vendors: /^flashforge$/i, port: '8898',
     help: 'Use an Adventurer 5M, 5M Pro, or AD5X with LAN mode enabled in its network settings, where its IP address, serial number, and check code are shown.' },
+  { value: 'flashforge_legacy', label: 'Flashforge legacy (port 8899)', protocol: 'flashforge_legacy', vendors: /^flashforge$/i, port: '8899',
+    help: 'Use an Adventurer 3 or 4, Guider, Creator, or Artemis connected to the network. Find its IP address in the printer’s network settings.' },
   { value: 'creality_lan', label: 'Creality LAN', protocol: 'creality_lan', vendors: /^creality$/i, port: '80',
     help: 'Use a Creality K1 or K2 series printer on stock firmware. Find its IP address in the printer’s network settings.' },
   { value: 'duet', label: 'Duet · RepRapFirmware', protocol: 'duet', port: '80',
