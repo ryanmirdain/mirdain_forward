@@ -65,7 +65,9 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`,
     SV01/SV02/SV05/SV06 (stock Marlin) need Klipper installed, or OctoPrint.
   - **Qidi**: X-Plus 3/4, X-Max 3/4, Q1 Pro, Q2 and Plus 4 run Moonraker. Older
     X-Plus/X-Max/X-CF Pro use `qidi_legacy`.
-  - **ELEGOO**: Neptune 4 series runs Moonraker; Centauri Carbon uses SDCP.
+  - **ELEGOO**: Neptune 4 series runs Moonraker; Centauri and Centauri Carbon use
+    SDCP; Centauri 2 and Centauri Carbon 2 are not supported (see Not supported);
+    older Neptune 2/3/X models are Marlin and use OctoPrint.
   - **FLSun**: S1, T1, and V400 run Klipper. Q5, QQ-S Pro, and SR are Marlin.
   - **Artillery**: Sidewinder X4 and M1 Pro run Klipper; older Genius, Hornet, and
     Sidewinder X1/X2/X3 are Marlin.
@@ -255,6 +257,8 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`,
 | Brand | Protocol investigated | Reason | Logged |
 | --- | --- | --- | --- |
 | Raise3D (Pro3, Pro3 Plus) | Raise3D Remote Access API (port 10800) | Upload and start-job endpoints are documented only on the printer itself; not confirmable without hardware | 2026-11-26 |
+| ELEGOO Centauri Carbon 2, Centauri 2 | ElegooLink CC2 (HTTP upload + MQTT) | Upload is known, but print start goes over undocumented MQTT; OrcaSlicer itself only uploads | 2026-11-26 |
+| Snapmaker J1, Artisan | SACP (binary, TCP 8888) | Framing is known, but the connect token, start-print MD5, head type, and idle state are not; a send could not avoid interrupting a print | 2026-11-26 |
 | Tiertime (UP300 HS, UP310 Pro, UP400 Pro, UP600 HS) and Afinia (H+1 HS) | Tiertime network printing (UP Studio) | Closed, undocumented vendor protocol; no public API | 2026-11-26 |
 | Anker (AnkerMake M5, M5C) | AnkerMake MQTT + PPPP | Needs Anker cloud account credentials and keys; proprietary encrypted protocols | 2026-11-26 |
 | Anycubic (Kobra 3, S1, Kobra 2 series) | Stock LAN mode (local MQTT over TLS) | Undocumented; credentials come from Anycubic Slicer Next and payloads are model-specific | 2026-11-26 |
@@ -551,3 +555,42 @@ Repetier host uses (read for protocol only). The sender:
    online, idle (`job` `"none"`), and not paused.
 2. `POST /printer/job/<slug>` (multipart `a=upload`, `name`, `autostart=true`, file
    in `filename`), failing on an `error` in the reply.
+
+### 2026-11-26 · Snapmaker J1 and Artisan · SACP · Not supported yet
+
+The J1 and Artisan speak SACP, Snapmaker's binary protocol, on TCP port 8888.
+Snapmaker Luban's `SacpClient.ts` and the compiled `@snapmaker/snapmaker-sacp-sdk`
+0.1.1 define it (read for protocol facts only):
+
+- Frame: `AA 55`, length (uint16 LE, payload + 8), version `01`, receiver, CRC-8
+  (poly 0x07, init 0) of bytes 0-5, sender, attribute (0 request, 1 ack),
+  sequence (uint16 LE), command set, command id, payload, then a ones'-complement
+  16-bit checksum of bytes 7 to the end of the payload, stored little-endian.
+  Peers: Luban 0, controller 1, screen 2. Strings are uint16 LE length + bytes.
+- Connect: `0x01 0x05` to the screen with host name, client name, and token.
+- Upload: zlib-deflate the file, then `0xB0 0x10` to the controller with name,
+  original size (uint32 LE), chunk count (960-byte chunks), and the MD5 hex of the
+  compressed data. The printer pulls chunks with `0xB0 0x11` (MD5, index) and
+  reports the result with `0xB0 0x02` (0 success, 12 no SD card).
+- Start: `0xAC 0x03` with MD5, G-code name, and a one-byte head type.
+
+What is missing: the host name and token values the printer accepts (and
+whether it asks for on-screen approval), whether the start command takes the
+compressed or original MD5, the head-type value for 3D printing, and any
+idle/printing state. Luban subscribes to line numbers and progress but exposes
+no state, so a sender could not refuse to start while a job is running. With
+those gaps unverifiable without a printer, no sender was written. Luban's
+`SnapmakerJ1Machine` and `SnapmakerArtisanMachine` classes are the next place
+to look.
+
+### 2026-11-26 · ELEGOO Centauri 2 family · ElegooLink CC2 · Not supported yet
+
+Orca's ElegooLink host (18 ELEGOO presets) has three modes: the OctoPrint-style
+API for Neptune 4 (Moonraker), SDCP for the Centauri and Centauri Carbon (already
+`elegoo_sdcp`), and a newer mode for the Centauri 2 and Centauri Carbon 2. That
+mode reads `GET /system/info?X-Token=<token>` (default token `123456`, reply
+`error_code` 0 and `system_info.sn`) and uploads chunks with `PUT /upload`, but
+OrcaSlicer logs "start print is not supported" after uploading: starting a print
+goes through an MQTT interface keyed by the serial number that ELEGOO has not
+documented. An upload-only sender would not meet Forward's contract (success
+means the printer accepted the print), so none was written.
