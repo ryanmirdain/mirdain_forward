@@ -22,6 +22,7 @@ open-source client code, compiled, and type-checked only.
 | `duet` | SeeMeCNC, Meltingplot, CONSTRUCT3D, Vivedino Troodon (RRF), RatRig (Duet builds), Custom RRF | `src/printers/DuetSender.cpp` | 2026-11-26 |
 | `snapmaker_http` | Snapmaker 2.0 A150, A250, A350 (U1 through `moonraker`) | `src/printers/SnapmakerSender.cpp` | 2026-11-26 |
 | `ultimaker_api` | UltiMaker S5 (and other S-line printers) | `src/printers/UltimakerSender.cpp` | 2026-11-26 |
+| `dremel_lan` | Dremel 3D45, 3D40 | `src/printers/DremelSender.cpp` | 2026-11-26 |
 
 ### Cross-repository work for new protocols
 
@@ -37,7 +38,7 @@ accepted outside this repository:
 - `mirdain_chat_ui/src/printer-presets/CustomPrinterDialog.tsx` (and its vendored
   copies) if the slicer's own printer dialog should offer it.
 
-Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`, `ultimaker_api`.
+Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`, `ultimaker_api`, `dremel_lan`.
 
 ## Caveats by brand
 
@@ -156,6 +157,23 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`,
     the job afterwards.
   - **UltiMaker 2, 2+, 2 Extended+** have no network interface (the 2+ Connect is
     not in the presets); use OctoPrint, which is still offered for UltiMaker.
+- **Dremel** (`dremel_lan`):
+  - The 3D20 has no network interface and is not supported (SD card only).
+  - The 3D40 traditionally prints Dremel's `.g3drem` format (G-code with a binary
+    header and thumbnail). Forward uploads plain `.gcode`, which the 3D45 accepts;
+    whether a given 3D40 firmware accepts it is unconfirmed.
+  - There is no authentication: anyone on the network can send to the printer,
+    and Forward needs only its address.
+  - Forward refuses to send while `door_open` is reported as 1. Success is the
+    status turning `busy` or the job `building`/`preparing` within 20 seconds.
+  - The protocol follows the community `dremel3dpy` library; Dremel does not
+    publish it.
+
+## Not supported
+
+| Brand | Protocol investigated | Reason | Logged |
+| --- | --- | --- | --- |
+| Raise3D (Pro3, Pro3 Plus) | Raise3D Remote Access API (port 10800) | Upload and start-job endpoints are documented only on the printer itself; not confirmable without hardware | 2026-11-26 |
 
 ## Investigation log
 
@@ -274,3 +292,38 @@ is what Cura uses on the LAN. The sender:
 2. Requires `GET /api/v1/printer/status` to be `"idle"`.
 3. `POST /api/v1/print_job` (multipart `file`, Digest auth), succeeding on HTTP 2xx;
    the printer starts the job itself.
+
+### 2026-11-26 · Raise3D · Remote Access API · Not supported yet
+
+Raise3D's RaiseTouch firmware has a Remote Access API, enabled under
+Setting > More Settings > Developer, with its password set in the same place.
+[Raise3D's docs](https://support.raise3d.com/RaiseTouch/6-1-7-1-enable-remote-access-api-17-895.html)
+say the API reference is served by the printer itself at `http://<ip>:10800`;
+there is no public copy. From a community client
+([kore.io.raise3d](https://github.com/ptro46/kore.io.raise3d)) only these parts are known:
+
+- Login: `GET /v1/login?sign=<s>&timestamp=<ms>`, where `s` is the lowercase hex
+  MD5 of the lowercase hex SHA-1 of `password=<pw>&timestamp=<ms>`; the token is
+  `data.token` and is passed to later calls as `?token=`.
+- Read-only: `GET /v1/printer/basic`, `/v1/printer/nozzle1`, `/v1/printer/nozzle2`,
+  `/v1/job/currentjob` (`data.job_status`).
+
+No public source gives the file upload or start-job endpoints, so a sender would
+be guesswork that could only be confirmed against a printer. To add support,
+someone with a Pro3 can enable the API, save the reference page at
+`http://<printer-ip>:10800`, and implement the upload and start calls from it.
+OctoPrint is listed for Raise3D in Add Printer only because it is offered for
+every non-Bambu vendor; Raise3D printers are not meant to be driven over USB.
+
+### 2026-11-26 · Dremel · Dremel HTTP command interface · Implemented
+
+Dremel's networked printers (3D45, 3D40) accept plain-text commands at
+`POST http://host/command` and uploads at `/print_file_uploads`, as used by the
+[dremel3dpy](https://github.com/godely/dremel3dpy) library (Home Assistant's
+Dremel integration). The sender:
+
+1. Posts `GETPRINTERSTATUS` and requires `status` `ready` with the door closed.
+2. Uploads the G-code as multipart field `print_file` with a short unique name.
+3. Posts `PRINT=<name>`, fails on an `error_code` other than 200, then polls
+   `GETPRINTERSTATUS` once a second until the job is `building` or `preparing`
+   or the printer is `busy`.

@@ -10,6 +10,7 @@
 #include "printers/DuetSender.h"
 #include "printers/SnapmakerSender.h"
 #include "printers/UltimakerSender.h"
+#include "printers/DremelSender.h"
 
 #include <stdexcept>
 #include <utility>
@@ -39,6 +40,8 @@ std::unique_ptr<PrinterSender> PrinterSender::create(const QString &protocol)
         return std::make_unique<SnapmakerSender>();
     if (protocol == "ultimaker_api")
         return std::make_unique<UltimakerSender>();
+    if (protocol == "dremel_lan")
+        return std::make_unique<DremelSender>();
     throw std::runtime_error(("Unsupported printer protocol: " + protocol).toStdString());
 }
 
