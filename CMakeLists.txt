@@ -61,6 +61,7 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/printers/MksSender.h src/printers/MksSender.cpp
     src/printers/SimplyPrintSender.h src/printers/SimplyPrintSender.cpp
     src/printers/FlashforgeLegacySender.h src/printers/FlashforgeLegacySender.cpp
+    src/printers/QidiLegacySender.h src/printers/QidiLegacySender.cpp
     src/platform/SlicerWindow.h src/platform/SlicerWindow.cpp
     src/platform/ApplicationReopen.h
     src/platform/DragWatcher.h

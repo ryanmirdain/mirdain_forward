@@ -5,7 +5,7 @@ Third-party components retain their respective licenses.
 
 Minimal Qt C++ menu bar / system tray app. It listens on **127.0.0.1:18744**,
 downloads a `.mirdain` archive, and sends the selected slice's **plate 0** to an
-ELEGOO, PrusaLink, Bambu LAN, Klipper (Moonraker), OctoPrint, Flashforge LAN, Creality LAN, Duet (RepRapFirmware), Snapmaker 2.0, UltiMaker S-line, Dremel, ESP3D, MKS Wi-Fi, or legacy Flashforge printer, or through SimplyPrint's cloud, then requests printing. No queue.
+ELEGOO, PrusaLink, Bambu LAN, Klipper (Moonraker), OctoPrint, Flashforge LAN, Creality LAN, Duet (RepRapFirmware), Snapmaker 2.0, UltiMaker S-line, Dremel, ESP3D, MKS Wi-Fi, legacy Flashforge, or legacy QIDI printer, or through SimplyPrint's cloud, then requests printing. No queue.
 Printer names, IDs, and settings are saved locally; printer credentials arrive in
 each request.
 
@@ -18,7 +18,7 @@ first layer has begun. Busy printers are not interrupted. Start commands are
 never automatically retried; after an unconfirmed start, check the printer
 before sending again.
 
-ELEGOO, PrusaLink, Moonraker, OctoPrint, Flashforge, Creality, Duet, Snapmaker, UltiMaker, Dremel, ESP3D, MKS, SimplyPrint, and legacy Flashforge receive the plain `.gcode` inside the native plate package;
+ELEGOO, PrusaLink, Moonraker, OctoPrint, Flashforge, Creality, Duet, Snapmaker, UltiMaker, Dremel, ESP3D, MKS, SimplyPrint, and legacy Flashforge and QIDI receive the plain `.gcode` inside the native plate package;
 Bambu receives the original `.gcode.3mf`. Temporary downloads are deleted after
 each transfer. Archive members are read without extracting a directory tree.
 Long menu status messages are ellipsized; the tray tooltip retains the full text.
@@ -291,7 +291,7 @@ The menu uses `supportsAutoLevelBed()` and `autoLevelBedEnabled()` to read each
 sender's capabilities and current value, and calls `setAutoLevelBedEnabled()`
 when the user changes it. Capability support belongs to the concrete sender;
 the menu contains no protocol-specific checks. ELEGOO and Bambu support this
-setting, as does Flashforge (`levelingBeforePrint`), while PrusaLink, Moonraker, OctoPrint, Creality, Duet, Snapmaker, UltiMaker, Dremel, ESP3D, MKS, SimplyPrint, and legacy Flashforge inherit the default unsupported capability.
+setting, as does Flashforge (`levelingBeforePrint`), while PrusaLink, Moonraker, OctoPrint, Creality, Duet, Snapmaker, UltiMaker, Dremel, ESP3D, MKS, SimplyPrint, and legacy Flashforge and QIDI inherit the default unsupported capability.
 
 `fileFormat()` selects plain G-code or the native plate archive.
 `send(PrinterFile, connection)` creates a temporary `PrinterSendJob` with the
@@ -752,6 +752,18 @@ FlashPrint console's 8899 and there is no authentication. Forward sends
 `~M28 <size> 0:/user/<name>` and the raw G-code, `~M29`, and `~M23` to print;
 each command waits for `ok`. See [FORWARD_SUPPORT.md](FORWARD_SUPPORT.md) for the
 data-framing caveat.
+
+### QIDI legacy (`qidi_legacy`)
+
+```json
+{"protocol":"qidi_legacy","host":"10.0.0.234"}
+```
+
+For the X-Plus, X-Max, and X-CF Pro before QIDI's Klipper models. The port
+defaults to UDP 3000 and there is no authentication. Forward sends `M4001` and
+`M4000` (requiring the idle flag), `M28 <name>`, checksummed 1280-byte blocks that
+each wait for `ok` or `resend`, `M29`, then `M6030 ":<name>" I1`. See
+[FORWARD_SUPPORT.md](FORWARD_SUPPORT.md) for caveats.
 
 `GET http://127.0.0.1:18744/health` returns
 `{"ok":true,"service":"mirdain_forward","version":"…"}` without contacting a

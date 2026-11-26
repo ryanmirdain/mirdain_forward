@@ -15,6 +15,7 @@
 #include "printers/MksSender.h"
 #include "printers/SimplyPrintSender.h"
 #include "printers/FlashforgeLegacySender.h"
+#include "printers/QidiLegacySender.h"
 
 #include <stdexcept>
 #include <utility>
@@ -54,6 +55,8 @@ std::unique_ptr<PrinterSender> PrinterSender::create(const QString &protocol)
         return std::make_unique<SimplyPrintSender>();
     if (protocol == "flashforge_legacy")
         return std::make_unique<FlashforgeLegacySender>();
+    if (protocol == "qidi_legacy")
+        return std::make_unique<QidiLegacySender>();
     throw std::runtime_error(("Unsupported printer protocol: " + protocol).toStdString());
 }
 

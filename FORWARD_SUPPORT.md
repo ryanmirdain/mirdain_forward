@@ -27,6 +27,7 @@ open-source client code, compiled, and type-checked only.
 | `mks_wifi` | CoLiDo, Flying Bear, Two Trees, and other printers with an MKS Robin Wi-Fi module | `src/printers/MksSender.cpp` | 2026-11-26 |
 | `simplyprint` | iQ (TiQ2, TiQ8) and any non-Bambu printer linked to SimplyPrint | `src/printers/SimplyPrintSender.cpp` | 2026-11-26 |
 | `flashforge_legacy` | Flashforge Adventurer 3/4, Guider, Creator, Artemis | `src/printers/FlashforgeLegacySender.cpp` | 2026-11-26 |
+| `qidi_legacy` | QIDI X-Plus, X-Max, X-CF Pro (pre-Klipper) | `src/printers/QidiLegacySender.cpp` | 2026-11-26 |
 
 ### Cross-repository work for new protocols
 
@@ -42,7 +43,7 @@ accepted outside this repository:
 - `mirdain_chat_ui/src/printer-presets/CustomPrinterDialog.tsx` (and its vendored
   copies) if the slicer's own printer dialog should offer it.
 
-Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`, `ultimaker_api`, `dremel_lan`, `esp3d`, `mks_wifi`, `simplyprint`, `flashforge_legacy`.
+Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`, `ultimaker_api`, `dremel_lan`, `esp3d`, `mks_wifi`, `simplyprint`, `flashforge_legacy`, `qidi_legacy`.
 
 ## Caveats by brand
 
@@ -62,7 +63,7 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`,
   - **Sovol**: only the Klipper models (SV07, SV08, SV08 MAX, Zero) run Moonraker.
     SV01/SV02/SV05/SV06 (stock Marlin) need Klipper installed, or OctoPrint.
   - **Qidi**: X-Plus 3/4, X-Max 3/4, Q1 Pro, Q2 and Plus 4 run Moonraker. Older
-    X-Plus/X-Max/X-CF Pro use Qidi's own firmware and are not supported.
+    X-Plus/X-Max/X-CF Pro use `qidi_legacy`.
   - **ELEGOO**: Neptune 4 series runs Moonraker; Centauri Carbon uses SDCP.
   - **FLSun**: S1, T1, and V400 run Klipper. Q5, QQ-S Pro, and SR are Marlin.
   - **Artillery**: Sidewinder X4 and M1 Pro run Klipper; older Genius, Hornet, and
@@ -216,6 +217,18 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`,
     holding the connection can block Forward.
   - Success is `ok` to `~M23`; there is no further start confirmation and no
     authentication. Uploads are slow over the console.
+- **QIDI legacy** (`qidi_legacy`; X-Plus, X-Max, X-CF Pro):
+  - The protocol is UDP on port 3000 with no authentication. Each 1280-byte block
+    waits for `ok` (or `resend <offset>`), with 3 tries of 2 seconds, so uploads of
+    large files take a long time.
+  - Plain `.gcode` is sent. QIDI's own tools compress to `.gcode.tz` with a closed
+    binary tool; uncompressed upload follows the QidiPrint plugin's fallback and
+    is unconfirmed on every firmware.
+  - No thumbnail (`M4010`) or print-time (`M2100`) lines are added, so the printer
+    screen shows no preview or time estimate.
+  - Busy detection requires `D:<done>/<total>/1` in the `M4000` reply; the start is
+    `M6030 ":<name>" I1` with no further confirmation beyond a reply without
+    `Error`.
 
 - **Other Klipper brands** (`moonraker`, offered from 2026-11-26 because their
   Orca presets target Klipper): BIQU Hurakan, BLOCKS, Chuanying X1, Co Print
@@ -504,3 +517,18 @@ Flashforge serial path (read for protocol only):
    `MachineStatus: READY`.
 2. `~M28 <size> 0:/user/<name>`, then the G-code in raw 4 KiB writes.
 3. After 3 seconds, `~M29` to save, then `~M23 0:/user/<name>` to print.
+
+### 2026-11-26 · QIDI (older models) · QIDI UDP protocol · Implemented
+
+QIDI's pre-Klipper printers take commands as UDP datagrams on port 3000. The
+open-source [QidiPrint](https://github.com/alkaes/QidiPrint) Cura plugin (read for
+protocol facts only; it is AGPL) shows the flow the sender follows:
+
+1. `M4001` (connect), then `M4000`, requiring the idle flag in `D:…/…/1`.
+2. `M28 <name>`, then blocks of up to 1280 bytes, each followed by its offset as
+   4 little-endian bytes, an XOR checksum over data and offset, and `0x83`;
+   `resend <n>` rewinds to byte `n`.
+3. `M29 <name>`, then `M6030 ":<name>" I1` to print.
+
+Unlike the plugin, a block that gets no reply after three tries fails the send
+instead of being skipped.
