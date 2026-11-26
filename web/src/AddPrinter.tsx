@@ -40,7 +40,8 @@ const protocols = [
   { value: 'mks_wifi', label: 'MKS Wi-Fi module', protocol: 'mks_wifi', vendors: /^(colido|flyingbear|twotrees|custom)$/i, port: '80',
     help: 'Use a printer with an MKS Robin Wi-Fi module and an SD card inserted. Find the module’s IP address on the printer’s Wi-Fi screen.' },
   { value: 'moonraker', label: 'Klipper · Moonraker', protocol: 'moonraker', port: '7125',
-    vendors: /^(voron|ratrig|sovol|qidi|vzbot|flsun|kingroon|twotrees|mellow|vivedino|positron3d|artillery|custom|elegoo|snapmaker|anycubic)$/i,
+    // Klipper firmware in the brand's presets; Moonraker on stock firmware is confirmed only for the first group.
+    vendors: /^(voron|ratrig|sovol|qidi|vzbot|flsun|kingroon|twotrees|mellow|vivedino|positron3d|artillery|custom|elegoo|snapmaker|anycubic|biqu|blocks|chuanying|co print|colido|comgrow|cubicon|deltamaker|eryone|flyingbear|ginger additive|infimech|lh|longer|magicmaker|openeye|peopoly|phrozen|rh3d|rolohaundesign|seckit|volumic|wanhao france|wondermaker|z-bolt|re3d)$/i,
     help: 'Use a Klipper printer running Moonraker (Mainsail or Fluidd). Find its IP address in the network settings. Moonraker listens on port 7125; use port 80 if only the Mainsail or Fluidd address is reachable.' },
   { value: 'flashforge_lan', label: 'Flashforge LAN', protocol: 'flashforge_lan', vendors: /^flashforge$/i, port: '8898',
     help: 'Use an Adventurer 5M, 5M Pro, or AD5X with LAN mode enabled in its network settings, where its IP address, serial number, and check code are shown.' },

@@ -208,12 +208,25 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`,
   - SimplyPrint's docs disagree on whether `CreateJob` also needs
     `select_mode: "file_id"`; Forward sends only `file_id`, as the CreateJob
     reference specifies.
+- **Other Klipper brands** (`moonraker`, offered from 2026-11-26 because their
+  Orca presets target Klipper): BIQU Hurakan, BLOCKS, Chuanying X1, Co Print
+  ChromaSet, CoLiDo DIY 4.0/SR1, Comgrow T300/T500, Cubicon xCeler, DeltaMaker,
+  Eryone Thinker X400, Flying Bear Reborn3, Ginger G1, InfiMech TX, LH Stinger,
+  LONGER LK10, MagicMaker BoneKing/hj SK, OpenEYE Peacock V2, Peopoly Magneto X,
+  Phrozen Arco, RH3D, Rolohaun Design, SecKit, Volumic EXO/SH Klipper builds,
+  Wanhao France SMARTPAD builds, WonderMaker ZR, Z-Bolt, and re3D Gigabot/Terabot.
+  Klipper G-code flavor alone does not prove a reachable Moonraker (Tiertime and
+  Flashforge also use it), so stock-firmware Moonraker access is unverified for
+  these; brands whose stock firmware hides it may need Mainsail/Fluidd installed.
+  Their Marlin models use OctoPrint (or ESP3D/MKS where fitted).
 
 ## Not supported
 
 | Brand | Protocol investigated | Reason | Logged |
 | --- | --- | --- | --- |
 | Raise3D (Pro3, Pro3 Plus) | Raise3D Remote Access API (port 10800) | Upload and start-job endpoints are documented only on the printer itself; not confirmable without hardware | 2026-11-26 |
+| Tiertime (UP300 HS, UP310 Pro, UP400 Pro, UP600 HS) and Afinia (H+1 HS) | Tiertime network printing (UP Studio) | Closed, undocumented vendor protocol; no public API | 2026-11-26 |
+| Anker (AnkerMake M5, M5C) | AnkerMake MQTT + PPPP | Needs Anker cloud account credentials and keys; proprietary encrypted protocols | 2026-11-26 |
 | Anycubic (Kobra 3, S1, Kobra 2 series) | Stock LAN mode (local MQTT over TLS) | Undocumented; credentials come from Anycubic Slicer Next and payloads are model-specific | 2026-11-26 |
 
 ## Investigation log
@@ -427,3 +440,47 @@ are managed through [SimplyPrint](https://simplyprint.io), whose API is
 
 The same route works for any printer brand already linked to SimplyPrint, so
 Add Printer offers it for every vendor except Bambu Lab.
+
+### 2026-11-26 · Anker · AnkerMake MQTT and PPPP · Not supported
+
+AnkerMake M5 and M5C printers have no documented local API. The community
+[ankermake-m5-protocol](https://github.com/Ankermgmt/ankermake-m5-protocol)
+project (`ankerctl`) reverse-engineered two protocols: encrypted MQTT through
+Anker's servers, and PPPP, a UDP peer-to-peer protocol for file transfer. Its
+[MQTT notes](https://raw.githubusercontent.com/Ankermgmt/ankermake-m5-protocol/master/documentation/developer-docs/mqtt-overview.md)
+show the MQTT login and encryption key come from Anker's HTTPS API using the
+account's auth token, which `ankerctl` imports from the official AnkerMake app's
+`login.json`. Forward would need to hold Anker account credentials and reimplement
+both proprietary protocols, none of which can be checked without a printer, so
+no sender was written. `ankerctl` itself can act as a local OctoPrint-compatible
+upload target; if it is running, the `octoprint` method may work through it, but
+that was not verified.
+
+### 2026-11-26 · Tiertime and Afinia · UP Studio network printing · Not supported
+
+Tiertime's UP printers, and Afinia's rebadged H+1 HS, connect over Wi-Fi and
+Ethernet but only through Tiertime's own software (UP Studio and Tiertime Print
+Queue). No public API or upload protocol exists; print-farm services describe it
+as a closed, vendor-specific protocol
+([Printago](https://printago.io/printers/tiertime-up300-hs),
+[SimplyPrint](https://simplyprint.io/compatibility/tiertime-up300-hs)). Their
+Orca presets use Tiertime-specific start G-code (`M970`/`M974`), and whether the
+printers accept uploaded G-code at all is unconfirmed. No sender was written.
+USB-stick printing remains the route outside UP Studio. Tiertime support could be
+asked for an SDK.
+
+### 2026-11-26 · Remaining preset brands · Coverage sweep · Mapped to existing protocols
+
+Every remaining vendor in the preset catalog was classified by the resolved
+`gcode_flavor` of its machine presets and its `host_type`:
+
+- Klipper models without a vendor protocol (list under Caveats, including Cubicon,
+  whose presets name `octoprint` but target Klipper) are offered `moonraker`.
+- Marlin-only brands use `octoprint`: Folgertech, Geeetech, Lulzbot, Tronxy,
+  Voxelab, Wanhao, WEMAKE3D, and the Marlin models of the brands above.
+- `Custom` covers Klipper, Marlin, RepRapFirmware, and Repetier generics; Repetier
+  Server has its own API, which is a separate candidate.
+- `OrcaArena` is a test printer definition, not real hardware, and is skipped.
+
+No sender was added in this entry, so it is part of a mapping commit rather than a
+new type.
