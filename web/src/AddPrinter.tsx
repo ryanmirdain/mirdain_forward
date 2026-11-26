@@ -55,6 +55,8 @@ const protocols = [
   { value: 'duet', label: 'Duet · RepRapFirmware', protocol: 'duet', port: '80',
     vendors: /^(seemecnc|meltingplot|construct3d|vivedino|ratrig|custom)$/i,
     help: 'Use a Duet board running RepRapFirmware 3, standalone or with a Raspberry Pi. Use the address you open Duet Web Control at.' },
+  { value: 'repetier', label: 'Repetier-Server', protocol: 'repetier', vendors: /^(?!bambu|bbl$)/i, port: '3344',
+    help: 'Use a printer connected to Repetier-Server. Use the server’s IP address, and copy the API key and the printer’s slug from Repetier-Server’s settings.' },
   // Any printer linked to SimplyPrint; its host is SimplyPrint's API rather than the printer.
   { value: 'simplyprint', label: 'SimplyPrint cloud', protocol: 'simplyprint', vendors: /^(?!bambu|bbl$)/i, port: '443', fixedHost: 'api.simplyprint.io',
     help: 'Use a printer already linked to SimplyPrint. API file uploads need SimplyPrint’s Print Farm plan. Create an API key in SimplyPrint’s account settings; the company and printer IDs appear in SimplyPrint’s URLs.' },
@@ -83,6 +85,10 @@ function connectionFields(protocol: string): Field[] {
     { key: 'company_id', label: 'SimplyPrint company ID', hint: 'The number after simplyprint.io/ in SimplyPrint’s web address while signed in.', required: true, pattern: '\\d+' },
     { key: 'printer_id', label: 'SimplyPrint printer ID', hint: 'Open the printer in SimplyPrint; its ID is the number in the address or printer settings.', required: true, pattern: '\\d+' },
     { key: 'api_key', label: 'SimplyPrint API key', hint: 'Create one in SimplyPrint under account settings, API.', required: true, type: 'password', pattern: '.*\\S.*' },
+  )
+  if (protocol === 'repetier') fields.push(
+    { key: 'printer_slug', label: 'Printer slug', hint: 'The printer’s short name in Repetier-Server, shown in its printer settings and URLs.', required: true, pattern: '\\S+' },
+    { key: 'api_key', label: 'Repetier-Server API key', hint: 'Find it in Repetier-Server under Global Settings, Connectivity.', required: true, type: 'password', pattern: '.*\\S.*' },
   )
   if (protocol === 'prusalink_password') fields.push(
     { key: 'username', label: 'PrusaLink username', hint: 'Use the username shown in the printer’s PrusaLink settings.', placeholder: 'maker' },

@@ -28,6 +28,7 @@ open-source client code, compiled, and type-checked only.
 | `simplyprint` | iQ (TiQ2, TiQ8) and any non-Bambu printer linked to SimplyPrint | `src/printers/SimplyPrintSender.cpp` | 2026-11-26 |
 | `flashforge_legacy` | Flashforge Adventurer 3/4, Guider, Creator, Artemis | `src/printers/FlashforgeLegacySender.cpp` | 2026-11-26 |
 | `qidi_legacy` | QIDI X-Plus, X-Max, X-CF Pro (pre-Klipper) | `src/printers/QidiLegacySender.cpp` | 2026-11-26 |
+| `repetier` | Custom Repetier printers and any non-Bambu printer attached to Repetier-Server | `src/printers/RepetierSender.cpp` | 2026-11-26 |
 
 ### Cross-repository work for new protocols
 
@@ -43,7 +44,7 @@ accepted outside this repository:
 - `mirdain_chat_ui/src/printer-presets/CustomPrinterDialog.tsx` (and its vendored
   copies) if the slicer's own printer dialog should offer it.
 
-Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`, `ultimaker_api`, `dremel_lan`, `esp3d`, `mks_wifi`, `simplyprint`, `flashforge_legacy`, `qidi_legacy`.
+Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`, `snapmaker_http`, `ultimaker_api`, `dremel_lan`, `esp3d`, `mks_wifi`, `simplyprint`, `flashforge_legacy`, `qidi_legacy`, `repetier`.
 
 ## Caveats by brand
 
@@ -229,6 +230,13 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`,
   - Busy detection requires `D:<done>/<total>/1` in the `M4000` reply; the start is
     `M6030 ":<name>" I1` with no further confirmation beyond a reply without
     `Error`.
+- **Repetier-Server** (`repetier`):
+  - Needs a Repetier-Server install connected to the printer, its API key, and the
+    printer's slug. The default port is 3344.
+  - Busy detection uses `printer/list`: `online` 1, `job` `"none"`, and not `paused`.
+  - Uploading to `printer/job/<slug>` with `autostart=true` adds the file to the
+    server's job queue and starts it when the printer is idle. Success is the
+    server accepting the job, not the printer starting.
 
 - **Other Klipper brands** (`moonraker`, offered from 2026-11-26 because their
   Orca presets target Klipper): BIQU Hurakan, BLOCKS, Chuanying X1, Co Print
@@ -500,8 +508,8 @@ Every remaining vendor in the preset catalog was classified by the resolved
   whose presets name `octoprint` but target Klipper) are offered `moonraker`.
 - Marlin-only brands use `octoprint`: Folgertech, Geeetech, Lulzbot, Tronxy,
   Voxelab, Wanhao, WEMAKE3D, and the Marlin models of the brands above.
-- `Custom` covers Klipper, Marlin, RepRapFirmware, and Repetier generics; Repetier
-  Server has its own API, which is a separate candidate.
+- `Custom` covers Klipper, Marlin, RepRapFirmware, and Repetier generics;
+  Repetier-Server got its own sender afterwards.
 - `OrcaArena` is a test printer definition, not real hardware, and is skipped.
 
 No sender was added in this entry, so it is part of a mapping commit rather than a
@@ -532,3 +540,14 @@ protocol facts only; it is AGPL) shows the flow the sender follows:
 
 Unlike the plugin, a block that gets no reply after three tries fails the send
 instead of being skipped.
+
+### 2026-11-26 · Custom Repetier printers · Repetier-Server API · Implemented
+
+The preset catalog's generic Repetier printer is driven by
+[Repetier-Server](https://www.repetier-server.com/), whose HTTP API OrcaSlicer's
+Repetier host uses (read for protocol only). The sender:
+
+1. `GET /printer/list` with `X-Api-Key`, finds the configured slug, and requires it
+   online, idle (`job` `"none"`), and not paused.
+2. `POST /printer/job/<slug>` (multipart `a=upload`, `name`, `autostart=true`, file
+   in `filename`), failing on an `error` in the reply.
