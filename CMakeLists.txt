@@ -203,6 +203,8 @@ if(APPLE)
         COMMAND "${CMAKE_COMMAND}" -E copy "${brotlicommon_library}"
             "$<TARGET_BUNDLE_DIR:mirdain_forward>/Contents/Frameworks/libbrotlicommon.1.dylib"
         COMMAND /bin/chmod u+w "$<TARGET_BUNDLE_DIR:mirdain_forward>/Contents/Frameworks/libbrotlicommon.1.dylib"
+        # Intel Homebrew dylibs are unsigned, and macdeployqt won't sign one it didn't deploy.
+        COMMAND /usr/bin/codesign --force --sign - "$<TARGET_BUNDLE_DIR:mirdain_forward>/Contents/Frameworks/libbrotlicommon.1.dylib"
         COMMAND "${macdeployqt}" "$<TARGET_BUNDLE_DIR:mirdain_forward>" ${deploy_library_paths} -codesign=-
         # Finder uses the bundle directory's date to invalidate cached icons.
         COMMAND "${CMAKE_COMMAND}" -E touch "$<TARGET_BUNDLE_DIR:mirdain_forward>"
