@@ -83,7 +83,8 @@ SetupServer::SetupServer(QHttpServer &server, AppConfig &config, AppPreferences 
         respond(json(Status::Ok, state()));
     });
     route(server, "/api/app/preferences", true, [this](const QJsonObject &body, const Respond &respond) {
-        this->preferences.save(body.value("launchAtSignIn").toBool(), body.value("notifications").toBool(), body.value("updates").toBool());
+        this->preferences.save(body.value("launchAtSignIn").toBool(), body.value("notifications").toBool(),
+            body.value("updates").toBool(), body.value("quitOnClose").toBool());
         respond(json(Status::Ok, state()));
     });
     route(server, "/api/app/startup-settings", true, [this](const QJsonObject &, const Respond &respond) {

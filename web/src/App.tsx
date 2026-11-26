@@ -180,6 +180,7 @@ function PreferencesStep({ state, standalone, onDone }: { state: AppState; stand
   const [launch, setLaunch] = useState(preferences.saved ? preferences.launchAtSignIn : preferences.launchSupported)
   const [notify, setNotify] = useState(preferences.saved ? preferences.notifications : true)
   const [updates, setUpdates] = useState(preferences.saved ? preferences.updates : preferences.updatesAvailable)
+  const [quitOnClose, setQuitOnClose] = useState(preferences.quitOnClose)
   const [saved, setSaved] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
@@ -187,7 +188,7 @@ function PreferencesStep({ state, standalone, onDone }: { state: AppState; stand
   async function save() {
     setPending(true); setError(''); setSaved(false)
     try {
-      const updated = await savePreferences({ launchAtSignIn: launch, notifications: notify, updates })
+      const updated = await savePreferences({ launchAtSignIn: launch, notifications: notify, updates, quitOnClose })
       // macOS asks the user to approve login items in System Settings before they run.
       if (updated.preferences.launchNeedsApproval && !needsApproval) { setNeedsApproval(true); return }
       setSaved(standalone)
@@ -211,6 +212,8 @@ function PreferencesStep({ state, standalone, onDone }: { state: AppState; stand
         description="Notify me when a plate is received or saved to USB." />
       <Toggle id="updates" label="Automatically check for updates" checked={updates} disabled={!preferences.updatesAvailable} onChange={setUpdates}
         description={preferences.updatesAvailable ? 'Check for new versions in the background. You choose when to install.' : 'Updates are unavailable in this build or installation.'} />
+      <Toggle id="quit-on-close" label="Quit when the window closes" checked={quitOnClose} onChange={setQuitOnClose}
+        description="Close Forward completely along with its window. The web slicer in your browser can’t send to printers while Forward is closed." />
     </div>
     {error && <div className="forward-setup-error" role="alert"><p>{error}</p></div>}
     <div className="forward-step-actions">

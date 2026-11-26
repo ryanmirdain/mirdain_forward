@@ -53,6 +53,9 @@ public:
     // Tells the page that Forward signed in or out (mirdainforwardaccount), so the slicer
     // reloads its session from Forward.
     void accountChanged();
+    // Called when the user closes the window (its close button, the page's caption button, or
+    // Close Window). Forward keeps running unless this quits it. The generic build has no window.
+    std::function<void()> closed;
 
     struct Impl;
 

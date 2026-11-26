@@ -256,6 +256,13 @@ public:
         updateShellMenu();
         // Signing in happens in the browser; come back to the window after it. The slicer in the
         // window shares the account, so it reloads its session either way.
+        // With Quit when the window closes on, closing the window quits Forward, after any plate
+        // transfer in progress finishes so the printer isn't left with half a file.
+        slicer->closed = [this] {
+            if (!preferences.quitOnWindowClose()) return;
+            if (active) quitWhenIdle = true;
+            else qApp->quit();
+        };
         account.changed = [this] {
             slicer->accountChanged();
             // Signing out forgets the organization, which unlocks the slicer's.
@@ -340,6 +347,8 @@ private:
     QAction *status;
     QAction *organizationAction;
     std::shared_ptr<Job> active;
+    // The window closed mid-transfer with Quit when the window closes on: quit once it ends.
+    bool quitWhenIdle = false;
     std::unique_ptr<SlicerWindow> slicer;
     std::unique_ptr<DragWatcher> dragWatcher;
     std::unique_ptr<GwaithRuns> gwaith;
@@ -565,6 +574,7 @@ private:
         active.reset();
         printerSettings.setBusy(false);
         updater.endTransfer();
+        if (quitWhenIdle) qApp->quit();
     }
 
     void download(const std::shared_ptr<Job> &job, const QUrl &url, std::function<void()> downloaded)

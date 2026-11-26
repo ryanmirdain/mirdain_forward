@@ -42,6 +42,8 @@ class HostWidget : public QWidget {
 public:
     ComPtr<ICoreWebView2Controller> controller;
     ComPtr<ICoreWebView2> webview;
+    // Called after the user closes the window.
+    std::function<void()> closed;
     // Bridge requests the page is waiting on Forward to answer; it isn't suspended meanwhile.
     int pendingRequests = 0;
 
@@ -124,6 +126,7 @@ protected:
     {
         event->ignore();
         hide();
+        if (closed) closed();
     }
 
     bool event(QEvent *event) override
@@ -303,7 +306,7 @@ void SlicerWindow::Impl::configure()
             // The header's caption buttons.
             if (method == "minimize" || method == "toggleMaximize" || method == "close") {
                 if (method == "minimize") window.showMinimized();
-                else if (method == "close") window.hide();
+                else if (method == "close") window.close();
                 else if (window.isMaximized()) window.showNormal();
                 else window.showMaximized();
                 reply(200, {});
@@ -341,7 +344,10 @@ void SlicerWindow::Impl::deliverOpenedFiles()
     openedFiles.clear();
 }
 
-SlicerWindow::SlicerWindow(const QUrl &url, Handler handler) : url(url), impl(new Impl(this, url, std::move(handler))) {}
+SlicerWindow::SlicerWindow(const QUrl &url, Handler handler) : url(url), impl(new Impl(this, url, std::move(handler)))
+{
+    impl->window.closed = [this] { if (closed) closed(); };
+}
 
 SlicerWindow::~SlicerWindow() = default;
 

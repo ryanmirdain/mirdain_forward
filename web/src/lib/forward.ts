@@ -11,6 +11,7 @@ export type Preferences = {
   notifications: boolean
   updates: boolean
   updatesAvailable: boolean
+  quitOnClose: boolean
 }
 export type Organization = { id: number; name: string }
 export type AppState = {
@@ -38,7 +39,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 const post = <T>(path: string, body: unknown = {}) => request<T>(path, { method: 'POST', body: JSON.stringify(body) })
 
 export const loadState = () => request<AppState>('state')
-export const savePreferences = (preferences: { launchAtSignIn: boolean; notifications: boolean; updates: boolean }) => post<AppState>('preferences', preferences)
+export const savePreferences = (preferences: { launchAtSignIn: boolean; notifications: boolean; updates: boolean; quitOnClose: boolean }) => post<AppState>('preferences', preferences)
 export const openStartupSettings = () => post<null>('startup-settings')
 // Opens Mirdain sign-in in the default browser; the page polls loadState until it completes.
 export const startSignIn = () => post<null>('sign-in')

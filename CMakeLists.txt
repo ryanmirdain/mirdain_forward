@@ -184,6 +184,9 @@ if(APPLE)
         execute_process(COMMAND "${brew}" --prefix OUTPUT_VARIABLE brew_prefix OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
         list(APPEND deploy_library_paths "-libpath=${brew_prefix}/lib")
     endif()
+    # Homebrew's libbrotlidec loads @rpath/libbrotlicommon, which macdeployqt
+    # cannot resolve from its Homebrew location. Pre-place it where it searches.
+    find_library(brotlicommon_library NAMES libbrotlicommon.1.dylib HINTS "${brew_prefix}/lib" REQUIRED)
     # Relinking restores Qt's development paths. Remove old deployed plugins so
     # the executable and Cocoa plugin cannot load different copies of Qt.
     add_custom_command(TARGET mirdain_forward PRE_LINK
@@ -197,6 +200,9 @@ if(APPLE)
     add_custom_command(TARGET mirdain_forward POST_BUILD
         COMMAND /usr/bin/ditto "${sparkle_SOURCE_DIR}/Sparkle.framework"
             "$<TARGET_BUNDLE_DIR:mirdain_forward>/Contents/Frameworks/Sparkle.framework"
+        COMMAND "${CMAKE_COMMAND}" -E copy "${brotlicommon_library}"
+            "$<TARGET_BUNDLE_DIR:mirdain_forward>/Contents/Frameworks/libbrotlicommon.1.dylib"
+        COMMAND /bin/chmod u+w "$<TARGET_BUNDLE_DIR:mirdain_forward>/Contents/Frameworks/libbrotlicommon.1.dylib"
         COMMAND "${macdeployqt}" "$<TARGET_BUNDLE_DIR:mirdain_forward>" ${deploy_library_paths} -codesign=-
         # Finder uses the bundle directory's date to invalidate cached icons.
         COMMAND "${CMAKE_COMMAND}" -E touch "$<TARGET_BUNDLE_DIR:mirdain_forward>"

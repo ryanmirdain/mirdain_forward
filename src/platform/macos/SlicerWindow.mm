@@ -45,6 +45,7 @@ static constexpr CGFloat HeaderHeight = 51;
     // Which menu bar items the page has enabled, reported with the menuBar bridge method.
     bool _fileMenuEnabled;
     bool _libraryAvailable;
+    bool _closeAvailable;
     bool _reportBugAvailable;
     // The window's frame before full screen, which leaving full screen zooms back to.
     NSRect _windowedFrame;
@@ -202,6 +203,13 @@ static constexpr NSTimeInterval ZoomDuration = 0.4;
     [self positionTrafficLights];
 }
 
+// WebKit can end the page's process while the window is closed (Forward is in the background as
+// an accessory app); the kept web view then shows white when it reopens, so load the page again.
+- (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView
+{
+    [self load:webView.URL ?: _requestedURL];
+}
+
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation
 {
     if (_window.styleMask & NSWindowStyleMaskFullScreen) [self setFullScreen:true];
@@ -273,6 +281,8 @@ static constexpr NSTimeInterval ZoomDuration = 0.4;
     [file addItemWithTitle:@"Open .mirdain" action:@selector(openArchive:) keyEquivalent:@"o"].target = self;
     [file addItemWithTitle:@"Open from library" action:@selector(openLibrary:) keyEquivalent:@""].target = self;
     [file addItemWithTitle:@"New" action:@selector(newProject:) keyEquivalent:@"n"].target = self;
+    [file addItem:[NSMenuItem separatorItem]];
+    [file addItemWithTitle:@"Close" action:@selector(closeTab:) keyEquivalent:@""].target = self;
     fileItem.submenu = file;
 
     auto *editItem = [_editMenu addItemWithTitle:@"Edit" action:nil keyEquivalent:@""];
@@ -306,12 +316,14 @@ static constexpr NSTimeInterval ZoomDuration = 0.4;
 - (void)openArchive:(id)sender { [self runMenuAction:@"open"]; }
 - (void)openLibrary:(id)sender { [self runMenuAction:@"library"]; }
 - (void)newProject:(id)sender { [self runMenuAction:@"new"]; }
+- (void)closeTab:(id)sender { [self runMenuAction:@"close"]; }
 - (void)reportBug:(id)sender { [self runMenuAction:@"reportBug"]; }
 
 - (BOOL)validateMenuItem:(NSMenuItem *)item
 {
     if (item.action == @selector(reportBug:)) return _reportBugAvailable;
     if (item.action == @selector(openLibrary:)) return _libraryAvailable;
+    if (item.action == @selector(closeTab:)) return _closeAvailable;
     if (item.action == @selector(openArchive:) || item.action == @selector(newProject:)) return _fileMenuEnabled;
     return YES;
 }
@@ -332,6 +344,7 @@ static constexpr NSTimeInterval ZoomDuration = 0.4;
 {
     [self windowDidResignKey:notification];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    if (_impl->owner->closed) _impl->owner->closed();
 }
 
 // MARK: Navigation
@@ -455,6 +468,7 @@ static constexpr NSTimeInterval ZoomDuration = 0.4;
         NSDictionary *body = [payload[@"body"] isKindOfClass:[NSDictionary class]] ? payload[@"body"] : @{};
         _fileMenuEnabled = [body[@"file"] boolValue];
         _libraryAvailable = [body[@"library"] boolValue];
+        _closeAvailable = [body[@"close"] boolValue];
         _reportBugAvailable = [body[@"reportBug"] boolValue];
         replyHandler(@{@"status": @200, @"body": @{}}, nil);
         return;
