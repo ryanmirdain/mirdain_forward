@@ -53,6 +53,7 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/printers/OctoPrintSender.h src/printers/OctoPrintSender.cpp
     src/printers/FlashforgeSender.h src/printers/FlashforgeSender.cpp
     src/printers/CrealitySender.h src/printers/CrealitySender.cpp
+    src/printers/DuetSender.h src/printers/DuetSender.cpp
     src/platform/SlicerWindow.h src/platform/SlicerWindow.cpp
     src/platform/ApplicationReopen.h
     src/platform/DragWatcher.h

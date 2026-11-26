@@ -36,6 +36,9 @@ const protocols = [
     help: 'Use an Adventurer 5M, 5M Pro, or AD5X with LAN mode enabled in its network settings, where its IP address, serial number, and check code are shown.' },
   { value: 'creality_lan', label: 'Creality LAN', protocol: 'creality_lan', vendors: /^creality$/i, port: '80',
     help: 'Use a Creality K1 or K2 series printer on stock firmware. Find its IP address in the printer’s network settings.' },
+  { value: 'duet', label: 'Duet · RepRapFirmware', protocol: 'duet', port: '80',
+    vendors: /^(seemecnc|meltingplot|construct3d|vivedino|ratrig|custom)$/i,
+    help: 'Use a Duet board running RepRapFirmware 3, standalone or with a Raspberry Pi. Use the address you open Duet Web Control at.' },
   // Any printer OctoPrint can drive over USB; Bambu Lab printers have no USB print connection.
   { value: 'octoprint', label: 'OctoPrint', protocol: 'octoprint', port: '80', vendors: /^(?!bambu|bbl$)/i,
     help: 'Connect the printer to an OctoPrint server (such as OctoPi) over USB. Use the OctoPrint server’s IP address, and create an API key in OctoPrint under Settings > Application Keys.' },
@@ -55,6 +58,7 @@ function connectionFields(protocol: string): Field[] {
     { key: 'serial_number', label: 'Printer serial number', hint: 'Find the serial number in the printer’s network settings or About page.', required: true, pattern: '\\S+' },
     { key: 'check_code', label: 'Check code', hint: 'Enable LAN mode in the printer’s network settings to show its check code.', required: true, type: 'password', pattern: '\\S+' },
   )
+  if (protocol === 'duet') fields.push({ key: 'password', label: 'Board password (optional)', hint: 'Needed only if a password was set with M551 in the board’s config.g.', type: 'password' })
   if (protocol === 'prusalink_password') fields.push(
     { key: 'username', label: 'PrusaLink username', hint: 'Use the username shown in the printer’s PrusaLink settings.', placeholder: 'maker' },
     { key: 'password', label: 'PrusaLink password', hint: 'Use the printer’s PrusaLink password, rather than your Mirdain password.', required: true, type: 'password' },

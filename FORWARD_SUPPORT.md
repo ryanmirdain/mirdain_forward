@@ -19,6 +19,7 @@ open-source client code, compiled, and type-checked only.
 | `octoprint` | Lulzbot, Wanhao, Creality (Ender/CR), Anycubic, Geeetech and any other brand except Bambu Lab, through a USB-attached OctoPrint server | `src/printers/OctoPrintSender.cpp` | 2026-11-26 |
 | `flashforge_lan` | Flashforge Adventurer 5M, 5M Pro, AD5X | `src/printers/FlashforgeSender.cpp` | 2026-11-26 |
 | `creality_lan` | Creality K1, K1C, K1 SE, K1 Max, K2, K2 Plus, K2 Pro (stock firmware) | `src/printers/CrealitySender.cpp` | 2026-11-26 |
+| `duet` | SeeMeCNC, Meltingplot, CONSTRUCT3D, Vivedino Troodon (RRF), RatRig (Duet builds), Custom RRF | `src/printers/DuetSender.cpp` | 2026-11-26 |
 
 ### Cross-repository work for new protocols
 
@@ -34,7 +35,7 @@ accepted outside this repository:
 - `mirdain_chat_ui/src/printer-presets/CustomPrinterDialog.tsx` (and its vendored
   copies) if the slicer's own printer dialog should offer it.
 
-Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`.
+Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`, `duet`.
 
 ## Caveats by brand
 
@@ -108,6 +109,22 @@ Pending for: `moonraker`, `octoprint`, `flashforge_lan`, `creality_lan`.
     WebSocket closes. Otherwise it times out after 30 seconds.
   - No auto-level setting: leveling follows the printer's own start routine and
     the sliced G-code.
+- **Duet / RepRapFirmware** (`duet`):
+  - RepRapFirmware 3 or newer is required: the status check uses the object model
+    (`rr_model` standalone, `/machine/status` with an SBC). RRF 2 boards report a
+    failure rather than being sent to blind.
+  - Standalone boards allow a few HTTP sessions; Forward does not call
+    `rr_disconnect`, so its session expires on the board's idle timeout. A board
+    with every session in use (many Duet Web Control tabs) refuses the connection.
+  - `rr_gcode` only queues `M32`, so success is the status turning to
+    `processing` within 20 seconds. A very short file that finishes before the
+    first poll would be reported as a failure.
+  - Files are stored on the board's SD card under `0:/gcodes/`, which must have
+    space. Leveling follows the sliced G-code and `start.g`.
+  - **RatRig**: V-Core 3 machines ship with either a Duet (RRF) or Klipper; both
+    methods are offered, Moonraker first.
+  - **SeeMeCNC**: older RostockMAX v3.2 boards (RAMBo/Marlin) are not Duet; use
+    OctoPrint for those.
 
 ## Investigation log
 
@@ -182,3 +199,19 @@ and community clients. The sender:
    printing status or the K1 post-start disconnect.
 
 Rooted K1/K2 printers that run Moonraker can alternatively use `moonraker`.
+
+### 2026-11-26 · SeeMeCNC (and other Duet printers) · RepRapFirmware HTTP · Implemented
+
+SeeMeCNC's Artemis, BOSSdelta, and RostockMAX v4 presets (28), Meltingplot, and
+CONSTRUCT3D name the `duet` host type. RepRapFirmware's HTTP API is documented
+([standalone](https://github.com/Duet3D/RepRapFirmware/wiki/HTTP-requests),
+[DSF](https://github.com/Duet3D/DuetSoftwareFramework#rest-api)). The sender:
+
+1. `GET /rr_connect?password=…&time=…` (`err` 0 required; a `sessionKey` is sent
+   back as `X-Session-Key`). If the request fails, it tries an SBC with
+   `GET /machine/connect?password=…`.
+2. Reads `state.status` and requires `idle`.
+3. Uploads to `0:/gcodes/` with `POST /rr_upload?name=…` (`err` 0) or
+   `PUT /machine/file/…`.
+4. Sends `M32 "0:/gcodes/<file>"` through `rr_gcode` or `POST /machine/code`, then
+   polls status once a second until it reads `processing`.
