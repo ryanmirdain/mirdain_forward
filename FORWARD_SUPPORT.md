@@ -17,6 +17,7 @@ open-source client code, compiled, and type-checked only.
 | `bambu_lan` | Bambu Lab | `src/printers/BambuSender.cpp` | Before this log |
 | `moonraker` | Voron, RatRig, Sovol, Qidi, Vzbot, FLSun, Kingroon, TwoTrees, Mellow, Vivedino, Positron3D, Artillery, ELEGOO Neptune 4, Custom Klipper | `src/printers/MoonrakerSender.cpp` | 2026-11-26 |
 | `octoprint` | Lulzbot, Wanhao, Creality (Ender/CR), Anycubic, Geeetech and any other brand except Bambu Lab, through a USB-attached OctoPrint server | `src/printers/OctoPrintSender.cpp` | 2026-11-26 |
+| `flashforge_lan` | Flashforge Adventurer 5M, 5M Pro, AD5X | `src/printers/FlashforgeSender.cpp` | 2026-11-26 |
 
 ### Cross-repository work for new protocols
 
@@ -32,7 +33,7 @@ accepted outside this repository:
 - `mirdain_chat_ui/src/printer-presets/CustomPrinterDialog.tsx` (and its vendored
   copies) if the slicer's own printer dialog should offer it.
 
-Pending for: `moonraker`, `octoprint`.
+Pending for: `moonraker`, `octoprint`, `flashforge_lan`.
 
 ## Caveats by brand
 
@@ -73,6 +74,22 @@ Pending for: `moonraker`, `octoprint`.
   - Offered for every vendor except Bambu Lab, including brands with a native
     protocol (Prusa, ELEGOO, Klipper brands), where it is listed after the native
     method.
+- **Flashforge** (`flashforge_lan`):
+  - LAN mode must be enabled on the printer, which shows the check code. The
+    serial number and check code authenticate every request.
+  - AD5X material station (IFS): Forward always sends `useMatlStation=false`,
+    `gcodeToolCnt=0`, and an empty material mapping, so prints are single-filament.
+    Multi-color AD5X prints are not supported; slot mappings are not derived from
+    the slice.
+  - Only the newer HTTP API (port 8898) is implemented. Adventurer 3/4, Guider,
+    Creator, and Artemis models that only speak Flashforge's legacy TCP G-code
+    protocol on port 8899 are not supported natively; use OctoPrint where the
+    printer allows USB printing.
+  - Busy detection uses `/detail` status strings `ready`, `completed`, and
+    `cancel` as idle. These come from community clients, not a published
+    specification; other states are reported as busy.
+  - Auto-leveling follows the saved setting (`levelingBeforePrint`); flow
+    calibration, first-layer inspection, and time-lapse are disabled.
 
 ## Investigation log
 
@@ -112,3 +129,20 @@ host type. OctoPrint's REST API is documented
    OctoPrint is not connected to the printer.
 3. `POST /api/files/local` (multipart, `select=true`, `print=true`) with a unique
    filename, and succeeds only when the response's `effectivePrint` is true.
+
+### 2026-11-26 · Flashforge · LAN HTTP API · Implemented
+
+Flashforge's Adventurer 5M, 5M Pro, and AD5X expose an HTTP API on port 8898 once
+LAN mode is enabled, authenticated by the serial number and check code. It has
+no official public specification; the request shapes follow OrcaSlicer's
+Flashforge host (read for protocol details only, no code copied) and community
+clients. The sender:
+
+1. `POST /detail` with `{"serialNumber","checkCode"}`, requires `code` 0 and an
+   idle `detail.status`.
+2. `POST /uploadGcode` (multipart field `gcodeFile`) with `serialNumber`,
+   `checkCode`, `fileSize`, `printNow: true`, `levelingBeforePrint`, and the
+   material-station headers in HTTP headers, and succeeds only on `code` 0.
+
+The legacy port 8899 TCP protocol (`~M601`, `~M28`, `~M29`, `~M23`) used by older
+models is a separate candidate and was not implemented in this entry.

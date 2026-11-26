@@ -32,6 +32,8 @@ const protocols = [
   { value: 'moonraker', label: 'Klipper · Moonraker', protocol: 'moonraker', port: '7125',
     vendors: /^(voron|ratrig|sovol|qidi|vzbot|flsun|kingroon|twotrees|mellow|vivedino|positron3d|artillery|custom|elegoo)$/i,
     help: 'Use a Klipper printer running Moonraker (Mainsail or Fluidd). Find its IP address in the network settings. Moonraker listens on port 7125; use port 80 if only the Mainsail or Fluidd address is reachable.' },
+  { value: 'flashforge_lan', label: 'Flashforge LAN', protocol: 'flashforge_lan', vendors: /^flashforge$/i, port: '8898',
+    help: 'Use an Adventurer 5M, 5M Pro, or AD5X with LAN mode enabled in its network settings, where its IP address, serial number, and check code are shown.' },
   // Any printer OctoPrint can drive over USB; Bambu Lab printers have no USB print connection.
   { value: 'octoprint', label: 'OctoPrint', protocol: 'octoprint', port: '80', vendors: /^(?!bambu|bbl$)/i,
     help: 'Connect the printer to an OctoPrint server (such as OctoPi) over USB. Use the OctoPrint server’s IP address, and create an API key in OctoPrint under Settings > Application Keys.' },
@@ -47,6 +49,10 @@ function connectionFields(protocol: string): Field[] {
   if (protocol === 'prusalink_api') fields.push({ key: 'api_key', label: 'PrusaLink API key', hint: 'Open PrusaLink in your browser and copy its API key from Settings.', required: true, type: 'password', pattern: '.*\\S.*' })
   if (protocol === 'moonraker') fields.push({ key: 'api_key', label: 'Moonraker API key (optional)', hint: 'Needed only when Moonraker requires authorization and does not trust this computer’s address. Find it in Mainsail or Fluidd’s settings.', type: 'password' })
   if (protocol === 'octoprint') fields.push({ key: 'api_key', label: 'OctoPrint API key', hint: 'Create one in OctoPrint under Settings > Application Keys.', required: true, type: 'password', pattern: '.*\\S.*' })
+  if (protocol === 'flashforge_lan') fields.push(
+    { key: 'serial_number', label: 'Printer serial number', hint: 'Find the serial number in the printer’s network settings or About page.', required: true, pattern: '\\S+' },
+    { key: 'check_code', label: 'Check code', hint: 'Enable LAN mode in the printer’s network settings to show its check code.', required: true, type: 'password', pattern: '\\S+' },
+  )
   if (protocol === 'prusalink_password') fields.push(
     { key: 'username', label: 'PrusaLink username', hint: 'Use the username shown in the printer’s PrusaLink settings.', placeholder: 'maker' },
     { key: 'password', label: 'PrusaLink password', hint: 'Use the printer’s PrusaLink password, rather than your Mirdain password.', required: true, type: 'password' },

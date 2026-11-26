@@ -51,6 +51,7 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/printers/UploadProgress.h src/printers/UploadProgress.cpp
     src/printers/MoonrakerSender.h src/printers/MoonrakerSender.cpp
     src/printers/OctoPrintSender.h src/printers/OctoPrintSender.cpp
+    src/printers/FlashforgeSender.h src/printers/FlashforgeSender.cpp
     src/platform/SlicerWindow.h src/platform/SlicerWindow.cpp
     src/platform/ApplicationReopen.h
     src/platform/DragWatcher.h
