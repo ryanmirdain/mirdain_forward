@@ -1,0 +1,84 @@
+# Forward printer support
+
+Which printer brands and connection protocols Mirdain Forward can send prints to,
+and which were investigated and set aside. Brands come from the Orca printer
+presets served by `mirdain_server` (`app/slicing_presets/orca/profiles`).
+
+None of the senders added below were tested against real printer hardware. Each
+was implemented from the vendor's or project's published API documentation and
+open-source client code, compiled, and type-checked only.
+
+## Supported protocols
+
+| Protocol (`connection.protocol`) | Brands | Sender | Added |
+| --- | --- | --- | --- |
+| `elegoo_sdcp` | ELEGOO (Centauri Carbon and other SDCP printers) | `src/printers/ElegooSender.cpp` | Before this log |
+| `prusalink` | Prusa (MK3.5, MK4/S, MINI, XL, CORE One) | `src/printers/PrusaSender.cpp` | Before this log |
+| `bambu_lan` | Bambu Lab | `src/printers/BambuSender.cpp` | Before this log |
+| `moonraker` | Voron, RatRig, Sovol, Qidi, Vzbot, FLSun, Kingroon, TwoTrees, Mellow, Vivedino, Positron3D, Artillery, ELEGOO Neptune 4, Custom Klipper | `src/printers/MoonrakerSender.cpp` | 2026-11-26 |
+
+### Cross-repository work for new protocols
+
+Forward accepts a new protocol in its local `/print` endpoint and in saved
+printers as soon as its sender exists. To add such a printer through Forward's
+Add Printer page or send to it from the web slicer, the protocol also has to be
+accepted outside this repository:
+
+- `mirdain_server/app/schemas.py`: a `SlicerPrinterConnection` subclass for the
+  protocol in `ClientSlicerPrinterCreate.connection` (otherwise saving returns 422).
+- `mirdain_web_slicer/src/features/printers/printerConnection.ts`: the protocol in
+  `PrinterConnection` and `printerConnection()`.
+- `mirdain_chat_ui/src/printer-presets/CustomPrinterDialog.tsx` (and its vendored
+  copies) if the slicer's own printer dialog should offer it.
+
+Pending for: `moonraker`.
+
+## Caveats by brand
+
+- **Bambu Lab** (`bambu_lan`): AMS slots are not derived from the slice. The request
+  must carry `use_ams` and an `ams_mapping` in the plate's filament order; the
+  default prints from the external spool. Firmware that requires signed commands
+  needs LAN Only mode with Developer Mode.
+- **Klipper printers** (`moonraker`):
+  - Bed leveling, nozzle wipes, and similar steps come from the sliced start G-code
+    and Klipper macros; Forward has no auto-level setting for Moonraker.
+  - Moonraker must be reachable on port 7125, or on the Mainsail/Fluidd port (often
+    80) when that front end proxies the API. Installations with authorization
+    enabled need an API key unless this computer's address is in
+    `trusted_clients`.
+  - If Moonraker's job queue is enabled and decides to queue the upload, Forward
+    reports a failure instead of success; the print may still start later.
+  - **Sovol**: only the Klipper models (SV07, SV08, SV08 MAX, Zero) run Moonraker.
+    SV01/SV02/SV05/SV06 (stock Marlin) need Klipper installed, or OctoPrint.
+  - **Qidi**: X-Plus 3/4, X-Max 3/4, Q1 Pro, Q2 and Plus 4 run Moonraker. Older
+    X-Plus/X-Max/X-CF Pro use Qidi's own firmware and are not supported.
+  - **ELEGOO**: Neptune 4 series runs Moonraker; Centauri Carbon uses SDCP.
+  - **FLSun**: S1, T1, and V400 run Klipper. Q5, QQ-S Pro, and SR are Marlin.
+  - **Artillery**: Sidewinder X4 and M1 Pro run Klipper; older Genius, Hornet, and
+    Sidewinder X1/X2/X3 are Marlin.
+  - **Kingroon**: KLP1 runs Klipper; KP3S models are Marlin.
+  - **Creality**: not offered for Moonraker. Stock K1/K2 firmware does not expose a
+    usable Moonraker without rooting; see Creality below.
+
+## Investigation log
+
+One brand and protocol per entry, newest last.
+
+### 2026-11-26 · Voron (and other Klipper printers) · Moonraker · Implemented
+
+Voron printers have no vendor firmware: they run Klipper with Moonraker and a
+Mainsail or Fluidd front end. Moonraker's HTTP API is documented
+([web API](https://moonraker.readthedocs.io/en/latest/web_api/)) and stable.
+The sender:
+
+1. `GET /printer/info` and requires Klipper `state` to be `ready`.
+2. `GET /printer/objects/query?print_stats=state` and requires `standby`,
+   `complete`, `cancelled`, or `error`, so a running or paused job is never
+   interrupted.
+3. `POST /server/files/upload` (multipart, `root=gcodes`, `print=true`) with a
+   unique filename, and succeeds only when the response reports
+   `print_started: true`.
+
+An optional `api_key` is sent as `X-Api-Key`. The same sender covers every
+Klipper brand listed above. Add Printer now picks connection methods from a table
+of vendors, so ELEGOO offers both SDCP and Moonraker.

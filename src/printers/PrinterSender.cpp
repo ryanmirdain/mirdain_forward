@@ -3,6 +3,7 @@
 #include "printers/ElegooSender.h"
 #include "printers/PrusaSender.h"
 #include "printers/BambuSender.h"
+#include "printers/MoonrakerSender.h"
 
 #include <stdexcept>
 #include <utility>
@@ -18,6 +19,8 @@ std::unique_ptr<PrinterSender> PrinterSender::create(const QString &protocol)
         return std::make_unique<PrusaSender>();
     if (protocol == "bambu_lan")
         return std::make_unique<BambuSender>();
+    if (protocol == "moonraker")
+        return std::make_unique<MoonrakerSender>();
     throw std::runtime_error(("Unsupported printer protocol: " + protocol).toStdString());
 }
 

@@ -19,12 +19,21 @@ function SetupHelp({ text, label }: { text: string; label: string }) {
   </span>
 }
 type Field = { key: string; label: string; hint: string; required?: boolean; type?: 'password' | 'number'; placeholder?: string; pattern?: string }
+// Each connection method lists the preset vendors it is offered for, the first being the default.
 const protocols = [
-  { value: 'elegoo_sdcp', label: 'ELEGOO SDCP', protocol: 'elegoo_sdcp' },
-  { value: 'prusalink_api', label: 'PrusaLink · API key', protocol: 'prusalink' },
-  { value: 'prusalink_password', label: 'PrusaLink · username and password', protocol: 'prusalink' },
-  { value: 'bambu_lan', label: 'Bambu LAN', protocol: 'bambu_lan' },
+  { value: 'elegoo_sdcp', label: 'ELEGOO SDCP', protocol: 'elegoo_sdcp', vendors: /elegoo/i, port: '3030',
+    help: 'Use an ELEGOO printer with SDCP support. Find its IP address in the network settings.' },
+  { value: 'prusalink_api', label: 'PrusaLink · API key', protocol: 'prusalink', vendors: /prusa/i, port: '80',
+    help: 'Enable PrusaLink in the printer’s network settings. Open its IP address in a browser to confirm it is available, then copy its login details.' },
+  { value: 'prusalink_password', label: 'PrusaLink · username and password', protocol: 'prusalink', vendors: /prusa/i, port: '80',
+    help: 'Enable PrusaLink in the printer’s network settings. Open its IP address in a browser to confirm it is available, then copy its login details.' },
+  { value: 'bambu_lan', label: 'Bambu LAN', protocol: 'bambu_lan', vendors: /bambu|^bbl$/i, port: '8883',
+    help: 'Enable LAN Only mode on your Bambu printer, and Developer Mode if required by its firmware. Find the IP address, serial number, and LAN access code in the printer’s settings.' },
+  { value: 'moonraker', label: 'Klipper · Moonraker', protocol: 'moonraker', port: '7125',
+    vendors: /^(voron|ratrig|sovol|qidi|vzbot|flsun|kingroon|twotrees|mellow|vivedino|positron3d|artillery|custom|elegoo)$/i,
+    help: 'Use a Klipper printer running Moonraker (Mainsail or Fluidd). Find its IP address in the network settings. Moonraker listens on port 7125; use port 80 if only the Mainsail or Fluidd address is reachable.' },
 ] as const
+const supportsVendor = (vendor: string) => protocols.some(item => item.vendors.test(vendor))
 
 function connectionFields(protocol: string): Field[] {
   const fields: Field[] = [{ key: 'host', label: 'Printer IP address or hostname', hint: 'Find this in the printer’s network settings. Use the printer’s address, not this computer’s.', required: true, placeholder: '192.168.1.100', pattern: '\\S+' }]
@@ -33,6 +42,7 @@ function connectionFields(protocol: string): Field[] {
     { key: 'access_code', label: 'LAN access code', hint: 'Find the access code in the printer’s LAN settings.', required: true, type: 'password', pattern: '\\S+' },
   )
   if (protocol === 'prusalink_api') fields.push({ key: 'api_key', label: 'PrusaLink API key', hint: 'Open PrusaLink in your browser and copy its API key from Settings.', required: true, type: 'password', pattern: '.*\\S.*' })
+  if (protocol === 'moonraker') fields.push({ key: 'api_key', label: 'Moonraker API key (optional)', hint: 'Needed only when Moonraker requires authorization and does not trust this computer’s address. Find it in Mainsail or Fluidd’s settings.', type: 'password' })
   if (protocol === 'prusalink_password') fields.push(
     { key: 'username', label: 'PrusaLink username', hint: 'Use the username shown in the printer’s PrusaLink settings.', placeholder: 'maker' },
     { key: 'password', label: 'PrusaLink password', hint: 'Use the printer’s PrusaLink password, rather than your Mirdain password.', required: true, type: 'password' },
@@ -58,11 +68,8 @@ export function AddPrinter({ state, step, onStep, onBack, onSkip, onSaved }: {
   const vendor = preset?.vendor || ''
   const presetId = preset?.id || ''
   const fields = connectionFields(protocol)
-  const connectionHelp = 'Turn on your printer and connect it to the same network as this computer. ' + (protocol === 'bambu_lan'
-    ? 'Enable LAN Only mode on your Bambu printer, and Developer Mode if required by its firmware. Find the IP address, serial number, and LAN access code in the printer’s settings.'
-    : protocol.startsWith('prusalink')
-      ? 'Enable PrusaLink in the printer’s network settings. Open its IP address in a browser to confirm it is available, then copy its login details.'
-      : 'Use an ELEGOO printer with SDCP support. Find its IP address in the network settings.')
+  const method = protocols.find(item => item.value === protocol)!
+  const connectionHelp = 'Turn on your printer and connect it to the same network as this computer. ' + method.help
 
   useEffect(() => { heading.current?.focus() }, [step])
 
@@ -96,7 +103,7 @@ export function AddPrinter({ state, step, onStep, onBack, onSkip, onSaved }: {
         if (pending) return
         setPending(true); setError('')
         try {
-          const connection: Connection = { ...config, protocol: protocols.find(item => item.value === protocol)!.protocol, host: settings.host.trim() }
+          const connection: Connection = { ...config, protocol: method.protocol, host: settings.host.trim() }
           if (settings.port) connection.port = Number(settings.port)
           if (protocol === 'bambu_lan' && settings.ftp_port) connection.ftp_port = Number(settings.ftp_port)
           const printer = await saveForwardPrinter(name.trim(), description, presetId, connection)
@@ -106,7 +113,7 @@ export function AddPrinter({ state, step, onStep, onBack, onSkip, onSaved }: {
         finally { setPending(false) }
       }}>
         <div className="forward-field"><div className="forward-field-label"><span id="forward-protocol-label">Connection method</span><SetupHelp label="Connection method" text={connectionHelp} /></div>
-          <SelectPicker value={protocol} ariaLabelledBy="forward-protocol-label" options={protocols.filter(item => item.protocol === (/prusa/i.test(vendor) ? 'prusalink' : /bambu|bbl/i.test(vendor) ? 'bambu_lan' : 'elegoo_sdcp')).map(item => ({ value: item.value, label: item.label }))}
+          <SelectPicker value={protocol} ariaLabelledBy="forward-protocol-label" options={protocols.filter(item => item.vendors.test(vendor)).map(item => ({ value: item.value, label: item.label }))}
             onValueChange={value => { setProtocol(value); setSettings({}) }} /></div>
         {fields.map(field => <div className="forward-field" key={field.key}>
           <div className="forward-field-label"><label htmlFor={`forward-${field.key}`}>{field.label}</label><SetupHelp label={field.label} text={field.hint} /></div>
@@ -115,7 +122,7 @@ export function AddPrinter({ state, step, onStep, onBack, onSkip, onSaved }: {
         </div>)}
         <details className="forward-advanced"><summary>Advanced connection settings</summary>
           <div className="forward-field"><label htmlFor="forward-port">{protocol === 'bambu_lan' ? 'MQTT port' : 'HTTP port'} (optional)</label>
-            <input id="forward-port" type="number" min={1} max={65535} placeholder={protocol === 'bambu_lan' ? '8883' : protocol === 'elegoo_sdcp' ? '3030' : '80'} value={settings.port || ''} onChange={event => setSettings(current => ({ ...current, port: event.target.value }))} /></div>
+            <input id="forward-port" type="number" min={1} max={65535} placeholder={method.port} value={settings.port || ''} onChange={event => setSettings(current => ({ ...current, port: event.target.value }))} /></div>
           {protocol === 'bambu_lan' && <div className="forward-field"><label htmlFor="forward-ftp-port">FTPS port (optional)</label><input id="forward-ftp-port" type="number" min={1} max={65535} placeholder="990" value={settings.ftp_port || ''} onChange={event => setSettings(current => ({ ...current, ftp_port: event.target.value }))} /></div>}
         </details>
         <div className="forward-step-actions"><button className="button" disabled={pending}>{pending ? 'Saving your printer…' : 'Save printer'}<span aria-hidden="true">→</span></button></div>
@@ -127,12 +134,12 @@ export function AddPrinter({ state, step, onStep, onBack, onSkip, onSaved }: {
         else onStep(0, 'back')
       }}>← Back</button>}
     </div>
-    {choosingPreset && <PrinterPresetDialog loadPresets={loadForwardPresets} selectedId={presetId || undefined}
+    {choosingPreset && <PrinterPresetDialog loadPresets={() => loadForwardPresets().then(presets => presets.filter(item => supportsVendor(item.vendor)))} selectedId={presetId || undefined}
       onClose={() => setChoosingPreset(false)} onSelect={items => {
         const selected = items[0]
         if (selected.id !== presetId) {
           setSettings({})
-          setProtocol(/prusa/i.test(selected.vendor) ? 'prusalink_api' : /bambu|bbl/i.test(selected.vendor) ? 'bambu_lan' : 'elegoo_sdcp')
+          setProtocol(protocols.find(item => item.vendors.test(selected.vendor))!.value)
         }
         setPreset(selected)
       }} />}

@@ -23,7 +23,7 @@ export type AppState = {
   slicerUrl: string
 }
 export type Membership = { id: number; name: string; role: string; accepted: boolean }
-export type Connection = { protocol: 'elegoo_sdcp' | 'prusalink' | 'bambu_lan'; host: string; [key: string]: string | number }
+export type Connection = { protocol: 'elegoo_sdcp' | 'prusalink' | 'bambu_lan' | 'moonraker'; host: string; [key: string]: string | number }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response
@@ -46,10 +46,8 @@ export const signOut = () => post<AppState>('sign-out')
 export const loadOrganizations = () => request<{ memberships: Membership[]; selected: number | null }>('organizations')
 // Registers Forward with the organization and loads its Forward printers into the menu bar.
 export const chooseOrganization = (organization: Organization) => post<AppState>('organization', organization)
-export async function loadForwardPresets(): Promise<PrinterPreset[]> {
-  const presets = await request<PrinterPreset[]>('printer-presets')
-  return presets.filter(item => /elegoo|prusa|bambu|^bbl$/i.test(item.vendor))
-}
+// All presets; Add Printer keeps the vendors that have a Forward connection method.
+export const loadForwardPresets = () => request<PrinterPreset[]>('printer-presets')
 export const saveForwardPrinter = (name: string, description: string, preset: string, connection: Connection) =>
   post<{ id: string; name: string }>('printers', { name, description: description.trim() || null, base_printer_preset_id: preset, connection })
 

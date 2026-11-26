@@ -48,6 +48,8 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/printers/BambuFtpsUpload.h src/printers/BambuFtpsUpload.cpp
     src/printers/BambuFilaments.h src/printers/BambuFilaments.cpp
     src/printers/BambuMqtt.h
+    src/printers/UploadProgress.h src/printers/UploadProgress.cpp
+    src/printers/MoonrakerSender.h src/printers/MoonrakerSender.cpp
     src/platform/SlicerWindow.h src/platform/SlicerWindow.cpp
     src/platform/ApplicationReopen.h
     src/platform/DragWatcher.h
