@@ -346,7 +346,7 @@ builds use the `universal` suffix. The DMG contains the deployed app, an
 from Applications before enabling automatic startup. Packaging verifies the
 app's signature and preserves its bundled frameworks, plugins, and permissions.
 These builds use ad-hoc signing unless `FORWARD_CODESIGN_IDENTITY` names a Developer
-ID identity, and are not notarized with Apple. See
+ID identity; only release DMGs are notarized with Apple. See
 [update release instructions](packaging/updates/README.md) before publishing updates.
 
 ### Windows
@@ -400,7 +400,7 @@ macOS artifact to find the DMG; Windows artifacts contain both the setup install
 preserve the app bundle's symlinks and permissions. macOS DMGs collect licenses
 in a **Licenses** folder and omit the README. Windows ZIPs include the README
 and licenses. Third-party licenses include libbgcode (AGPL-3.0), Heatshrink, and zlib.
-macOS release builds are Developer ID signed once configured
+macOS release builds are Developer ID signed and notarized once configured
 ([setup](packaging/updates/README.md#macos-code-signing)); other macOS builds are ad-hoc signed.
 Windows release builds are signed once Artifact Signing
 is configured ([setup](packaging/updates/README.md#windows-code-signing)); other Windows builds are unsigned. This

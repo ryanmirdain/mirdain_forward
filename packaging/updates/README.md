@@ -98,8 +98,26 @@ your login keychain, configure with
 `-DFORWARD_CODESIGN_IDENTITY="Developer ID Application: Mirdain Systems Inc. (NYDPRB5WDB)"`
 and every build signs the app.
 
-Builds are signed but not notarized, so Gatekeeper still warns on first launch
-of a downloaded DMG.
+### Notarization
+
+Once signing is configured, release DMGs are also Developer ID signed,
+notarized with Apple, and stapled, so a downloaded DMG opens with only the
+ordinary "downloaded from the internet" prompt. A rejected submission fails the
+release and prints Apple's log naming the offending file.
+
+1. In App Store Connect, under **Users and Access > Integrations > Team Keys**,
+   create a key with the **Developer** role and download its `.p8` (Apple offers
+   the download only once).
+2. Add it as a `release` environment secret:
+   ```sh
+   gh secret set FORWARD_NOTARY_KEY_P8 --env release < AuthKey_KEYID.p8
+   ```
+3. Add the repository variables `FORWARD_NOTARY_KEY_ID` (the key's ID) and
+   `FORWARD_NOTARY_ISSUER_ID` (the issuer ID shown above the key list). Setting
+   the key ID turns notarization on.
+
+The ticket is stapled to the DMG. The app copied out of it is checked against
+Apple's ticket online on first launch.
 
 ## Publish a version
 
@@ -166,8 +184,8 @@ Forward anymore.
 ## Platform signing and compatibility
 
 This pipeline signs update packages for Sparkle/WinSparkle verification. macOS
-builds get Developer ID signatures once configured (see macOS code signing);
-notarization remains deferred. Windows builds get Authenticode signatures once
+builds get Developer ID signatures and notarization once configured (see macOS
+code signing). Windows builds get Authenticode signatures once
 Artifact Signing is configured (see Windows code signing). Update-package signatures do not remove
 OS publisher warnings. OS signing happens before packaging and Ed25519 signing;
 never change installer bytes after calculating an update signature.

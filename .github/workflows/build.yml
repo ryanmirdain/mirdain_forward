@@ -30,7 +30,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     # Release builds read their code signing secrets from the release environment.
     environment: ${{ inputs.release && 'release' || '' }}
-    timeout-minutes: 30
+    # Notarization usually takes minutes but can queue at Apple.
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
@@ -142,6 +143,31 @@ jobs:
       - name: Package macOS
         if: runner.os == 'macOS'
         run: cmake --build build --config Release --target package
+
+      - name: Notarize macOS
+        # Changes the DMG's bytes, so it must precede the Ed25519 update signature.
+        if: runner.os == 'macOS' && inputs.release && vars.FORWARD_MACOS_SIGNING_IDENTITY != '' && vars.FORWARD_NOTARY_KEY_ID != ''
+        env:
+          FORWARD_CODESIGN_IDENTITY: ${{ vars.FORWARD_MACOS_SIGNING_IDENTITY }}
+          FORWARD_NOTARY_KEY_P8: ${{ secrets.FORWARD_NOTARY_KEY_P8 }}
+          FORWARD_NOTARY_KEY_ID: ${{ vars.FORWARD_NOTARY_KEY_ID }}
+          FORWARD_NOTARY_ISSUER_ID: ${{ vars.FORWARD_NOTARY_ISSUER_ID }}
+        shell: bash
+        run: |
+          key="$RUNNER_TEMP/notary.p8"
+          printf '%s\n' "$FORWARD_NOTARY_KEY_P8" > "$key"
+          notary=(--key "$key" --key-id "$FORWARD_NOTARY_KEY_ID" --issuer "$FORWARD_NOTARY_ISSUER_ID")
+          for dmg in dist/*.dmg; do
+            codesign --timestamp --sign "$FORWARD_CODESIGN_IDENTITY" "$dmg"
+            result=$(xcrun notarytool submit "$dmg" "${notary[@]}" --wait --timeout 20m --output-format json)
+            if [[ "$(jq -r .status <<< "$result")" != Accepted ]]; then
+              echo "$result"
+              xcrun notarytool log "$(jq -r .id <<< "$result")" "${notary[@]}"
+              exit 1
+            fi
+            xcrun stapler staple "$dmg"
+          done
+          rm "$key"
 
       - name: Package Windows
         if: runner.os == 'Windows'
