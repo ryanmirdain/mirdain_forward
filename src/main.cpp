@@ -234,6 +234,10 @@ public:
                 } else if (method == "signOut") {
                     account.signOut();
                     reply(Status::Ok, {});
+                } else if (method == "addPrinter") {
+                    // The slicer's Forward Printers "+ Add" opens the same page as Add Printer… in the menu.
+                    reply(Status::Ok, {});
+                    slicer->showPage(forwardPage("/add-printer"));
                 } else reply(Status::NotFound, {{"error", "Unknown Forward method."}});
             });
         const auto first = menu.actions().first();

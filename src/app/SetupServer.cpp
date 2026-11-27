@@ -3,6 +3,7 @@
 #include "app/AppConfig.h"
 #include "app/AppPreferences.h"
 #include "app/LocalAddress.h"
+#include "printers/BambuDiscovery.h"
 #include "printers/PrinterSettings.h"
 
 #include <QFile>
@@ -137,6 +138,13 @@ SetupServer::SetupServer(QHttpServer &server, AppConfig &config, AppPreferences 
         this->account.request("GET", "/api/v1/printer-presets", {}, [respond](int status, const QJsonDocument &body) {
             respond(status == 200 ? json(Status::Ok, body.array()) : error(Status::BadGateway, apiError(status, body)));
         }, false);
+    });
+    // Add Printer fills in a Bambu LAN printer's serial number once its address is entered.
+    route(server, "/api/app/bambu-serial", true, [this](const QJsonObject &body, const Respond &respond) {
+        findBambuSerial(body.value("host").toString().trimmed(), this, [respond](const QString &serial) {
+            respond(serial.isEmpty() ? error(Status::NotFound, "No Bambu Lab printer answered at that address.")
+                : json(Status::Ok, QJsonObject{{"serial", serial}}));
+        });
     });
     route(server, "/api/app/printers", true, [this](const QJsonObject &body, const Respond &respond) {
         const auto organization = this->account.organization();

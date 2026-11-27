@@ -1,7 +1,7 @@
 // Copied from aperture/src/components/ForwardSetup.tsx without its Verify Forward step:
 // these pages are served by Forward, which is signed in and registered with an organization.
 import { useEffect, useId, useRef, useState } from 'react'
-import { loadForwardPresets, saveForwardPrinter, type AppState, type Connection, type PrinterPreset } from './lib/forward'
+import { findBambuSerial, loadForwardPresets, saveForwardPrinter, type AppState, type Connection, type PrinterPreset } from './lib/forward'
 import { SelectPicker } from './components/SelectPicker'
 import { PrinterPresetDialog } from './printer-presets/PrinterPresetDialog'
 
@@ -110,6 +110,7 @@ export function AddPrinter({ state, step, onStep, onBack, onSkip, onSaved }: {
   const [protocol, setProtocol] = useState('elegoo_sdcp')
   const [settings, setSettings] = useState<Record<string, string>>({})
   const [pending, setPending] = useState(false)
+  const [findingSerial, setFindingSerial] = useState(false)
   const [error, setError] = useState('')
   const heading = useRef<HTMLHeadingElement>(null)
   const vendor = preset?.vendor || ''
@@ -164,8 +165,18 @@ export function AddPrinter({ state, step, onStep, onBack, onSkip, onSaved }: {
             onValueChange={value => { setProtocol(value); setSettings({}) }} /></div>
         {fields.map(field => <div className="forward-field" key={field.key}>
           <div className="forward-field-label"><label htmlFor={`forward-${field.key}`}>{field.label}</label><SetupHelp label={field.label} text={field.hint} /></div>
-          <input id={`forward-${field.key}`} type={field.type || 'text'} required={field.required} pattern={field.pattern} placeholder={field.placeholder} autoComplete="off"
-            value={settings[field.key] || ''} onChange={event => { setSettings(current => ({ ...current, [field.key]: event.target.value })) }} />
+          <input id={`forward-${field.key}`} type={field.type || 'text'} required={field.required} pattern={field.pattern} autoComplete="off"
+            placeholder={field.key === 'serial_number' && findingSerial ? 'Finding serial number…' : field.placeholder}
+            value={settings[field.key] || ''} onChange={event => { setSettings(current => ({ ...current, [field.key]: event.target.value })) }}
+            onBlur={field.key === 'host' && protocol === 'bambu_lan' ? () => {
+              // Fills in the serial number from the printer, leaving one the user already typed.
+              const host = (settings.host || '').trim()
+              if (!host || settings.serial_number?.trim()) return
+              setFindingSerial(true)
+              findBambuSerial(host).then(serial => setSettings(current =>
+                (current.host || '').trim() === host && !current.serial_number?.trim() ? { ...current, serial_number: serial } : current))
+                .catch(() => {}).finally(() => setFindingSerial(false))
+            } : undefined} />
         </div>)}
         {!('fixedHost' in method) && <details className="forward-advanced"><summary>Advanced connection settings</summary>
           <div className="forward-field"><label htmlFor="forward-port">{protocol === 'bambu_lan' ? 'MQTT port' : 'HTTP port'} (optional)</label>

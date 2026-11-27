@@ -45,6 +45,7 @@ qt_add_executable(mirdain_forward MACOSX_BUNDLE
     src/printers/PrusaSender.h src/printers/PrusaSender.cpp
     src/printers/PrusaBgcode.h src/printers/PrusaBgcode.cpp
     src/printers/BambuSender.h src/printers/BambuSender.cpp
+    src/printers/BambuDiscovery.h src/printers/BambuDiscovery.cpp
     src/printers/BambuFtpsUpload.h src/printers/BambuFtpsUpload.cpp
     src/printers/BambuFilaments.h src/printers/BambuFilaments.cpp
     src/printers/BambuMqtt.h
@@ -211,6 +212,16 @@ if(APPLE)
         COMMENT "Bundling Qt frameworks and plugins"
         VERBATIM
     )
+    # Release builds replace the ad-hoc signatures with Developer ID ones.
+    set(FORWARD_CODESIGN_IDENTITY "" CACHE STRING "Developer ID Application identity; empty signs ad-hoc")
+    if(FORWARD_CODESIGN_IDENTITY)
+        add_custom_command(TARGET mirdain_forward POST_BUILD
+            COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/sign.sh"
+                "$<TARGET_BUNDLE_DIR:mirdain_forward>" "${FORWARD_CODESIGN_IDENTITY}"
+            COMMENT "Signing with ${FORWARD_CODESIGN_IDENTITY}"
+            VERBATIM
+        )
+    endif()
 elseif(WIN32)
     target_sources(mirdain_forward PRIVATE
         src/platform/windows/StartupRegistration.cpp

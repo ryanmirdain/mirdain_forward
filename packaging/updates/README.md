@@ -74,6 +74,33 @@ SmartScreen warnings fade as the certificate builds download reputation; signing
 shows Mirdain Systems as the publisher immediately and is required for Smart
 App Control.
 
+## macOS code signing
+
+macOS release builds are signed with the Developer ID Application certificate
+of Mirdain Systems Inc. (team `NYDPRB5WDB`, expires 2027-12-26) once it is
+configured: Sparkle's helpers, every bundled framework, dylib and plugin, then
+the app, all with hardened runtime and a secure timestamp. Until then, and in
+non-release builds, the app is signed ad-hoc. Signing happens before the DMG is
+built and before the Ed25519 update signature.
+
+1. Add the `.p12` and its password as `release` environment secrets, without
+   either one passing through a file or shell history:
+   ```sh
+   base64 -i identity.p12 | gh secret set FORWARD_MACOS_CERTIFICATE_P12 --env release
+   gh secret set FORWARD_MACOS_CERTIFICATE_PASSWORD --env release
+   ```
+2. Add the repository variable `FORWARD_MACOS_SIGNING_IDENTITY`:
+   `Developer ID Application: Mirdain Systems Inc. (NYDPRB5WDB)`. Setting it
+   turns signing on.
+
+`packaging/macos/sign.sh` does the signing. Locally, with the certificate in
+your login keychain, configure with
+`-DFORWARD_CODESIGN_IDENTITY="Developer ID Application: Mirdain Systems Inc. (NYDPRB5WDB)"`
+and every build signs the app.
+
+Builds are signed but not notarized, so Gatekeeper still warns on first launch
+of a downloaded DMG.
+
 ## Publish a version
 
 1. Update `project(... VERSION ...)` in `CMakeLists.txt`.
@@ -138,10 +165,10 @@ Forward anymore.
 
 ## Platform signing and compatibility
 
-This pipeline signs update packages for Sparkle/WinSparkle verification. Apple
-Developer ID signing/notarization remains deferred: macOS builds use ad-hoc
-signatures. Windows builds get Authenticode signatures once Artifact Signing is
-configured (see Windows code signing). Update-package signatures do not remove
+This pipeline signs update packages for Sparkle/WinSparkle verification. macOS
+builds get Developer ID signatures once configured (see macOS code signing);
+notarization remains deferred. Windows builds get Authenticode signatures once
+Artifact Signing is configured (see Windows code signing). Update-package signatures do not remove
 OS publisher warnings. OS signing happens before packaging and Ed25519 signing;
 never change installer bytes after calculating an update signature.
 

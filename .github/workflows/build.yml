@@ -28,8 +28,8 @@ jobs:
   build:
     name: ${{ matrix.platform }}-${{ matrix.cpu }}
     runs-on: ${{ matrix.runner }}
-    # Windows release builds read the Artifact Signing secret from the release environment.
-    environment: ${{ inputs.release && matrix.platform == 'windows' && 'release' || '' }}
+    # Release builds read their code signing secrets from the release environment.
+    environment: ${{ inputs.release && 'release' || '' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -98,10 +98,31 @@ jobs:
       - name: Install Qt MQTT
         run: cmake --install build-deps/qtmqtt-build
 
+      - name: Import Developer ID certificate
+        # Releases are signed once the identity is configured (packaging/updates/README.md).
+        if: runner.os == 'macOS' && inputs.release && vars.FORWARD_MACOS_SIGNING_IDENTITY != ''
+        env:
+          FORWARD_MACOS_CERTIFICATE_P12: ${{ secrets.FORWARD_MACOS_CERTIFICATE_P12 }}
+          FORWARD_MACOS_CERTIFICATE_PASSWORD: ${{ secrets.FORWARD_MACOS_CERTIFICATE_PASSWORD }}
+        shell: bash
+        run: |
+          keychain="$RUNNER_TEMP/forward-signing.keychain-db"
+          keychain_password=$(openssl rand -base64 24)
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          base64 --decode <<< "$FORWARD_MACOS_CERTIFICATE_P12" > "$RUNNER_TEMP/forward-signing.p12"
+          security import "$RUNNER_TEMP/forward-signing.p12" -k "$keychain" -f pkcs12 \
+            -P "$FORWARD_MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/forward-signing.p12"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+
       - name: Configure
         env:
           FORWARD_UPDATE_FEED_URL: ${{ vars[matrix.update-feed-var] }}
           FORWARD_UPDATE_PUBLIC_KEY: ${{ vars[matrix.update-key-var] }}
+          FORWARD_CODESIGN_IDENTITY: ${{ runner.os == 'macOS' && inputs.release && vars.FORWARD_MACOS_SIGNING_IDENTITY || '' }}
         shell: bash
         run: |
           # Without a public key, normal CI produces an updater-disabled build.
@@ -112,7 +133,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}" \
             -DFORWARD_UPDATE_FEED_URL="${FORWARD_UPDATE_FEED_URL}" \
-            -DFORWARD_UPDATE_PUBLIC_KEY="${FORWARD_UPDATE_PUBLIC_KEY}"
+            -DFORWARD_UPDATE_PUBLIC_KEY="${FORWARD_UPDATE_PUBLIC_KEY}" \
+            -DFORWARD_CODESIGN_IDENTITY="${FORWARD_CODESIGN_IDENTITY}"
 
       - name: Build and deploy dependencies
         run: cmake --build build --config Release --parallel

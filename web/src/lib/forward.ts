@@ -49,6 +49,8 @@ export const loadOrganizations = () => request<{ memberships: Membership[]; sele
 export const chooseOrganization = (organization: Organization) => post<AppState>('organization', organization)
 // All presets; Add Printer keeps the vendors that have a Forward connection method.
 export const loadForwardPresets = () => request<PrinterPreset[]>('printer-presets')
+// Asks the Bambu Lab printer at host for its serial number over SSDP; rejects when none answers.
+export const findBambuSerial = (host: string) => post<{ serial: string }>('bambu-serial', { host }).then(result => result.serial)
 export const saveForwardPrinter = (name: string, description: string, preset: string, connection: Connection) =>
   post<{ id: string; name: string }>('printers', { name, description: description.trim() || null, base_printer_preset_id: preset, connection })
 
