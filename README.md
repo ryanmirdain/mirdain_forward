@@ -4,7 +4,8 @@ Licensed under the [GNU General Public License v3.0](LICENSE) (GPL-3.0-only).
 Third-party components retain their respective licenses.
 
 Minimal Qt C++ menu bar / system tray app. It listens on **127.0.0.1:18744**,
-downloads a `.mirdain` archive, and sends the selected slice's **plate 0** to an
+downloads a `.mirdain` archive, and sends the selected slice's requested plate
+(`plate`, zero-based, default 0) to an
 ELEGOO, PrusaLink, Bambu LAN, Klipper (Moonraker), OctoPrint, Flashforge LAN, Creality LAN, Duet (RepRapFirmware), Snapmaker 2.0, UltiMaker S-line, Dremel, ESP3D, MKS Wi-Fi, legacy Flashforge, or legacy QIDI printer, through Repetier-Server, or through SimplyPrint's cloud, then requests printing. No queue.
 Printer names, IDs, and settings are saved locally; printer credentials arrive in
 each request.

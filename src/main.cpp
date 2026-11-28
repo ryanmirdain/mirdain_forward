@@ -133,6 +133,8 @@ struct Job {
     QByteArray downloadAuthorization;
     QTemporaryFile archive;
     QString sliceId;
+    // The zero-based plate coordinate to send.
+    int plate = 0;
     QString filename;
     QJsonObject connection;
     PrinterSender *sender = nullptr;
@@ -434,9 +436,12 @@ private:
             const QUrl url(body.value("url").toString());
             if (!url.isValid() || url.host().isEmpty() || (url.scheme() != "http" && url.scheme() != "https"))
                 throw std::runtime_error("url must be an HTTP(S) download link to a .mirdain archive.");
+            const auto plate = body.value("plate").toInt(0);
+            if (plate < 0) throw std::runtime_error("plate must be a zero-based plate coordinate.");
             auto *sender = printerSettings.remember(body);
             auto job = std::make_shared<Job>(reply);
             job->connection = connection;
+            job->plate = plate;
             job->downloadAuthorization = body.value("download_headers").toObject().value("Authorization").toString().toUtf8();
             job->sender = sender;
             job->noticeTitle = "Sending to " + sender->name();
@@ -444,7 +449,7 @@ private:
             connect(sender, &PrinterSender::progress, this, [this](const QString &message) { transferStatus(message); });
             connect(sender, &PrinterSender::completed, this, [this, job] {
                 job->doneMessage = "Print requested " + job->filename;
-                job->result = {{"ok", true}, {"print_requested", true}, {"filename", job->filename}, {"plate", 0}};
+                job->result = {{"ok", true}, {"print_requested", true}, {"filename", job->filename}, {"plate", job->plate}};
                 finish(job);
             });
             connect(sender, &PrinterSender::failed, this, [this, job](const QString &error) { finish(job, error); });
@@ -666,10 +671,10 @@ private:
                     if (entry.toObject().value("id").toString() == job->sliceId) slice = entry.toObject();
             }
             const auto member = slice.contains("plate_paths")
-                ? slice.value("plate_paths").toObject().value("0").toString()
-                : slice.value("path").toString();
+                ? slice.value("plate_paths").toObject().value(QString::number(job->plate)).toString()
+                : job->plate == 0 ? slice.value("path").toString() : QString();
             if (slice.value("format").toString() != "gcode.3mf" || !member.endsWith(".gcode.3mf"))
-                throw std::runtime_error("The selected slice has no .gcode.3mf output for plate 0.");
+                throw std::runtime_error(QString("The selected slice has no .gcode.3mf output for plate %1.").arg(job->plate + 1).toStdString());
             // Each native per-plate package contains one plain .gcode file.
             auto package = archive.read(member);
             QBuffer plate(&package);
