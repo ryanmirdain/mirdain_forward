@@ -79,6 +79,8 @@ jobs:
       ref: ${{ needs.prepare.outputs.commit }}
       release: true
       release_tag: ${{ needs.prepare.outputs.tag }}
+    # Without this the called jobs get no secrets, even from their release environment.
+    secrets: inherit
 
   publish:
     needs: [prepare, build]
